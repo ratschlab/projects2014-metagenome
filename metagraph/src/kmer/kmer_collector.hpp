@@ -6,6 +6,7 @@
 #include "threading.hpp"
 #include "sorted_set.hpp"
 #include "sorted_multiset.hpp"
+#include "allocators.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
@@ -75,7 +76,7 @@ class KmerStorage {
 
 template <typename KMER,
           class KmerExtractor,
-          class Container = Vector<KMER>,
+          class Container = Vector<KMER, mmap_allocator<KMER>>,
           class Cleaner = utils::NoCleanup>
 using KmerCollector = KmerStorage<KMER,
                                   KmerExtractor,
@@ -84,7 +85,8 @@ using KmerCollector = KmerStorage<KMER,
 template <typename KMER,
           class KmerExtractor,
           typename KmerCount = uint8_t,
-          class Container = Vector<std::pair<KMER, KmerCount>>,
+          class Container = Vector<std::pair<KMER, KmerCount>,
+                                   mmap_allocator<std::pair<KMER, KmerCount>>>,
           class Cleaner = utils::NoCleanup>
 using KmerCounter = KmerStorage<KMER,
                                 KmerExtractor,

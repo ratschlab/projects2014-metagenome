@@ -4,6 +4,7 @@
 
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "allocators.hpp"
 
 
 template <typename KMER, typename COUNT>
@@ -140,9 +141,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
     initialize_chunk(alph_size_, kmers.begin(), kmers.end(), k_, &W_, &last_, &F_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer64>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer128>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer256>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer64, mmap_allocator<KmerExtractorBOSS::Kmer64>>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer128, mmap_allocator<KmerExtractorBOSS::Kmer128>>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer256, mmap_allocator<KmerExtractorBOSS::Kmer256>>&);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<KmerExtractorBOSS::Kmer64>&);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<KmerExtractorBOSS::Kmer128>&);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<KmerExtractorBOSS::Kmer256>&);
@@ -161,9 +162,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
     initialize_chunk(alph_size_, kmers_with_counts.begin(), kmers_with_counts.end(), k_, &W_, &last_, &F_, &weights_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>, mmap_allocator<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>, mmap_allocator<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>, mmap_allocator<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>> &, uint8_t);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>> &, uint8_t);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
 // template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);

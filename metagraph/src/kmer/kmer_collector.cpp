@@ -236,13 +236,14 @@ void KmerStorage<KMER, KmerExtractor, Container>::join() {
 #define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER, CLEANUP) \
     template class KmerStorage<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedSet<KMER, CONTAINER<KMER>, CLEANUP>>; \
+                               SortedSet<KMER, CONTAINER<KMER, mmap_allocator<KMER>>, CLEANUP>>; \
     template class KmerStorage<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>, CLEANUP>>; \
-    template class KmerStorage<KMER, \
-                               KMER_EXTRACTOR, \
-                               SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>, CLEANUP>>;
+                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>, mmap_allocator<std::pair<KMER, uint8_t>>>, CLEANUP>>; \
+/*     template class KmerStorage<KMER, \
+ *                                KMER_EXTRACTOR, \
+ *                                SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>, mmap_allocator<std::pair<KMER, uint32_t>>>, CLEANUP>>;
+ */
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector, utils::NoCleanup)

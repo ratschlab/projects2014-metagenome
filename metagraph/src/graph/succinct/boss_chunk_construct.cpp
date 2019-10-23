@@ -241,19 +241,19 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 
 template <typename KMER>
 using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                      Vector<std::pair<KMER, uint8_t>>,
+                                      Vector<std::pair<KMER, uint8_t>, mmap_allocator<std::pair<KMER, uint8_t>>>,
                                       utils::NoCleanup>;
 template <typename KMER>
 using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                           Vector<std::pair<KMER, uint8_t>>,
+                                           Vector<std::pair<KMER, uint8_t>, mmap_allocator<std::pair<KMER, uint8_t>>>,
                                            utils::DummyKmersCleaner>;
 template <typename KMER>
 using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
-                                          Vector<KMER>,
+                                          Vector<KMER, mmap_allocator<KMER>>,
                                           utils::NoCleanup>;
 template <typename KMER>
 using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                               Vector<KMER>,
+                                               Vector<KMER, mmap_allocator<KMER>>,
                                                utils::DummyKmersCleaner>;
 
 template <typename KMER>
