@@ -2,7 +2,7 @@
 #define __ALLOCATORS_HPP__
 
 #include <memory>
-#include <sdsl/memory_management.hpp>
+#include <sdsl/int_vector_mapper.hpp>
 
 /** A faster alternative to std::allocator<T>
  *
@@ -99,17 +99,10 @@ class mmap_allocator {
   public:
     typedef T value_type;
 
-    mmap_allocator() : hp_alloc_(new sdsl::hugepage_allocator()) {
-        try {
-            hp_alloc_->init(1'000'000);
-        } catch (...) {
-            std::cout << errno << std::endl;
-            exit(1);
-        }
-    }
+    mmap_allocator() {}
 
     template <typename U>
-    mmap_allocator(const mmap_allocator<U> &) : mmap_allocator() {}
+    mmap_allocator(const mmap_allocator<U> &) {}
     mmap_allocator& operator=(const mmap_allocator &) { return *this; }
 
     mmap_allocator(mmap_allocator&& other) = default;
@@ -123,12 +116,13 @@ class mmap_allocator {
     bool operator!=(const mmap_allocator &other) const { return !(*this == other); }
 
     T* allocate(size_t num_to_allocate) {
-        return static_cast<T*>(hp_alloc_->mm_alloc(num_to_allocate * sizeof(T)));
+        mappers_.emplace_back(sdsl::temp_file_buffer<8>::create());
+        mappers_.back().resize(sizeof(T) * num_to_allocate);
+        return reinterpret_cast<T*>(mappers_.back().data());
     }
 
-    void deallocate(T *ptr, size_t /* num_to_free */) {
-        hp_alloc_->mm_free(static_cast<void*>(ptr));
-    }
+    // TODO: free deallocated memory
+    void deallocate(T */*ptr*/, size_t /* num_to_free */) {}
 
     // boilerplate that shouldn't be needed, except
     // libstdc++ doesn't use allocator_traits yet
@@ -154,7 +148,7 @@ class mmap_allocator {
     void destroy(U *object) { object->~U(); }
 
   private:
-    std::unique_ptr<sdsl::hugepage_allocator> hp_alloc_;
+    std::vector<sdsl::int_vector_mapper<8>> mappers_;
 };
 
 #endif // __ALLOCATORS_HPP__
