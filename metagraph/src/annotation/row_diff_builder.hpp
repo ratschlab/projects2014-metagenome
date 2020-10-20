@@ -61,7 +61,8 @@ void traverse_anno_chunked(
 
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir);
+                               const std::filesystem::path &dest_dir,
+                               bool with_counts);
 
 } // namespace annot
 } // namespace mtg

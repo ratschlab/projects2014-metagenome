@@ -1083,7 +1083,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         const std::filesystem::path &dest_dir) {
+                         const std::filesystem::path &dest_dir,
+                         bool with_counts) {
     if (!files.size())
         return;
 
@@ -1113,7 +1114,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         Timer timer;
         logger->trace("Starting transforming batch of {} columns ...",
                       file_batch.size());
-        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir);
+        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, with_counts);
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
 }

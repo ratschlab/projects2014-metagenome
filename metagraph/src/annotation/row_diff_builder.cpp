@@ -102,7 +102,11 @@ void traverse_anno_chunked(
 
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir) {
+                               const std::filesystem::path &dest_dir,
+                               bool with_counts) {
+    // TODO: implement
+    std::ignore = with_counts;
+
     if (source_files.empty())
         return;
 
@@ -111,7 +115,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
     for (const auto &fname : source_files) {
         auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-        anno->merge_load({fname});
+        anno->load(fname);
         sources.push_back(std::move(anno));
     }
     logger->trace("Done loading {} annotations", sources.size());
