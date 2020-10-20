@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include <sdsl/enc_vector.hpp>
-
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
