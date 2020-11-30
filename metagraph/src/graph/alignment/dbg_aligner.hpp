@@ -366,7 +366,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_aggregate(DBGQueryAlignment &paths,
                   const AlignmentGenerator &alignment_generator) const {
     AlignmentAggregator<node_index, AlignmentCompare> path_queue(
-        paths.get_query(), paths.get_query_reverse_complement(), config_
+        paths.get_query(), paths.get_query_reverse_complement(), graph_, config_
     );
 
     alignment_generator(
