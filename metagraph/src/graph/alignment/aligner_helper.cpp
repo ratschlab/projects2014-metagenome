@@ -391,26 +391,11 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
         case Cigar::Operator::MISMATCH: {
             assert(end_it_ > begin_it_);
             assert(ref_end_it_ > ref_begin_it_);
-            assert(node_it_ > alignment_->begin());
+            assert(node_it_ - 1 > alignment_->begin());
             score_ -= config_->get_row(*(end_it_ - 1))[*(ref_end_it_ - 1)];
             --end_it_;
             --ref_end_it_;
-
-            // if we're at the first node of the alignment, then traverse
-            // backwards to reconstruct a path
-            if (node_it_ - 1 == alignment_->begin()) {
-                auto last_node = prefix_node_ ? prefix_node_ : alignment_->front();
-                assert(last_node);
-                prefix_node_ = DeBruijnGraph::npos;
-                graph_->adjacent_incoming_nodes(last_node, [&](auto prev) {
-                    // TODO: what if there are multiple?
-                    if (!prefix_node_)
-                        prefix_node_ = prev;
-                });
-                ++offset_;
-            } else {
-                --node_it_;
-            }
+            --node_it_;
         } break;
         case Cigar::Operator::DELETION: {
             assert(end_it_ > begin_it_);
@@ -425,7 +410,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
         case Cigar::Operator::INSERTION: {
             assert((--(cigar_it_.base())).get_it() >= alignment_->get_cigar().begin());
             assert(ref_end_it_ > ref_begin_it_);
-            assert(node_it_ > alignment_->begin());
+            assert(node_it_ - 1 > alignment_->begin());
             if ((--(cigar_it_.base())).offset()) {
                 score_ -= config_->gap_extension_penalty;
             } else {
@@ -433,23 +418,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
             }
 
             --ref_end_it_;
-
-            // if we're at the first node of the alignment, then traverse
-            // backwards to reconstruct a path
-            if (node_it_ - 1 == alignment_->begin()) {
-                auto last_node = prefix_node_ ? prefix_node_ : alignment_->front();
-                assert(last_node);
-                prefix_node_ = DeBruijnGraph::npos;
-                graph_->adjacent_incoming_nodes(last_node, [&](auto prev) {
-                    // TODO: what if there are multiple?
-                    if (!prefix_node_)
-                        prefix_node_ = prev;
-                });
-                ++offset_;
-
-            } else {
-                --node_it_;
-            }
+            --node_it_;
         } break;
         case Cigar::Operator::CLIPPED: { assert(false); }
     }
@@ -572,12 +541,7 @@ Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix
     }
 
     query_begin_ = data.get_query().data();
-    auto prefix_node = alignment_prefix.get_prefix_node();
-    if (prefix_node) {
-        nodes_.assign(&prefix_node, &prefix_node + 1);
-    } else {
-        nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it());
-    }
+    nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it());
 
     cigar_ = data.get_cigar();
     orientation_ = data.get_orientation();
@@ -708,6 +672,9 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
     AlignmentSuffix<NodeType> second_suffix(second, config, graph.get_k());
     AlignmentSuffix<NodeType> best_second_suffix = second_suffix;
+
+    assert(Alignment(first_prefix).is_valid(graph, &config));
+    assert(Alignment(second_suffix).is_valid(graph, &config));
 
     size_t overlap = first_prefix.get_query().data() + first_prefix.get_query().size()
         - second_suffix.get_query().data();

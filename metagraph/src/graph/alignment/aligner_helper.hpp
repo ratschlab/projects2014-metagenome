@@ -643,7 +643,7 @@ class AlignmentPrefix {
             cigar_rend_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar()))),
             cigar_it_(cigar_rbegin_),
             score_(alignment_->get_score()),
-            trim_(0), offset_(0), prefix_node_(DeBruijnGraph::npos),
+            trim_(0), offset_(0),
             node_it_(alignment_->end()) {
         cigar_rbegin_ += alignment_->get_end_clipping();
         cigar_rend_ -= alignment_->get_clipping();
@@ -669,7 +669,7 @@ class AlignmentPrefix {
     typename std::vector<NodeType>::const_iterator get_node_end_it() const { return node_it_; }
 
     bool eof() const {
-        return cigar_it_ == cigar_rend_ || (offset_ && !prefix_node_);
+        return (cigar_it_ == cigar_rend_) || (node_it_ - 1 == alignment_->begin());
     }
     bool reof() const { return cigar_it_ == cigar_rbegin_; }
 
@@ -677,7 +677,6 @@ class AlignmentPrefix {
 
     size_t get_trim() const { return trim_; }
     size_t get_offset() const { return offset_; }
-    DeBruijnGraph::node_index get_prefix_node() const { return prefix_node_; }
 
     const DeBruijnGraph& get_graph() const { return *graph_; }
 
@@ -696,7 +695,6 @@ class AlignmentPrefix {
     score_t score_;
     size_t trim_;
     size_t offset_;
-    DeBruijnGraph::node_index prefix_node_;
     typename std::vector<NodeType>::const_iterator node_it_;
 };
 
