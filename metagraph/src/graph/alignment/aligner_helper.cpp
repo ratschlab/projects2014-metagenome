@@ -1297,9 +1297,6 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 if (!std::equal(cur.begin() + 1, cur.end(), seq.begin()))
                     throw std::runtime_error("Invalid edge in JSON");
 
-                logger->warn("Found node not reachable by call_outgoing_kmers: {}",
-                             nodes_.back());
-
                 next = seq.back();
             }
 
@@ -1395,8 +1392,6 @@ bool spell_path(const DeBruijnGraph &graph,
                 std::cerr << graph.get_node_sequence(path[i - 1]) << " " << graph.get_node_sequence(path[i]) << std::endl;
                 return false;
             } else {
-                logger->warn("Found node not reachable by call_outgoing_kmers: {}",
-                             path[i]);
                 next = next_seq.back();
             }
         }
