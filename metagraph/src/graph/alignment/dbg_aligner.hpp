@@ -32,7 +32,7 @@ class IDBGAligner {
     virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
-template <class Seeder = ExactSeeder<>,
+template <class Seeder = ExactMapSeeder<>,
           class Extender = DefaultColumnExtender<>>
 class SeedAndExtendAligner : public IDBGAligner {
   public:
@@ -97,7 +97,7 @@ class SeedAndExtendAligner : public IDBGAligner {
 };
 
 
-template <class Seeder = ExactSeeder<>,
+template <class Seeder = ExactMapSeeder<>,
           class Extender = DefaultColumnExtender<>,
           class AlignmentCompare = std::less<Alignment<>>>
 class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
@@ -370,7 +370,10 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
     );
 
     alignment_generator(
-        [&](DBGAlignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
+        [&](DBGAlignment&& alignment) {
+            alignment.trim_offset(&graph_);
+            path_queue.add_alignment(std::move(alignment));
+        },
         [&](const DBGAlignment &seed) { return path_queue.get_min_path_score(seed); }
     );
 

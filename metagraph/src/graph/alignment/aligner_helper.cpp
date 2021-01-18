@@ -2,7 +2,9 @@
 
 #include <tsl/hopscotch_set.h>
 
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "common/logger.hpp"
 
 
@@ -383,41 +385,58 @@ void Alignment<NodeType>::append(Alignment&& other) {
 }
 
 template <typename NodeType>
-void Alignment<NodeType>::trim_offset() {
+void Alignment<NodeType>::trim_offset(const DeBruijnGraph *graph) {
     if (!offset_ || empty() || cigar_.empty())
         return;
 
-    auto it = cigar_.begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    if (it == cigar_.end())
-        return;
-
-    auto jt = nodes_.begin();
-    size_t counter = 0;
-    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
-        if (counter == it->second
-                || it->first == Cigar::CLIPPED
-                || it->first == Cigar::DELETION) {
+    if (nodes_.size() > 1) {
+        auto it = cigar_.begin();
+        if (it->first == Cigar::CLIPPED)
             ++it;
-            counter = 0;
-            continue;
+
+        if (it == cigar_.end())
+            return;
+
+        auto jt = nodes_.begin();
+        size_t counter = 0;
+        while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
+            if (counter == it->second
+                    || it->first == Cigar::CLIPPED
+                    || it->first == Cigar::DELETION) {
+                ++it;
+                counter = 0;
+                continue;
+            }
+
+            size_t jump = std::min(std::min(offset_, size_t(it->second)),
+                                   static_cast<size_t>(nodes_.end() - jt));
+            offset_ -= jump;
+            counter += jump;
+            jt += jump;
         }
 
-        size_t jump = std::min(std::min(offset_, size_t(it->second)),
-                               static_cast<size_t>(nodes_.end() - jt));
-        offset_ -= jump;
-        counter += jump;
-        jt += jump;
+        if (jt == nodes_.end()) {
+            --jt;
+            ++offset_;
+        }
+
+        nodes_.erase(nodes_.begin(), jt);
     }
 
-    if (jt == nodes_.end()) {
-        --jt;
-        ++offset_;
-    }
+    if (graph) {
+        const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(graph);
+        if (range_graph && range_graph->get_offset(nodes_[0])) {
+            assert(nodes_.size() == 1);
 
-    nodes_.erase(nodes_.begin(), jt);
+            // TODO: For now, take the first one found. Find a better way to pick
+            //       which node take.
+            bool found = false;
+            range_graph->call_nodes_in_range(nodes_[0], [&](node_index node) {
+                nodes_[0] = node;
+                found = true;
+            }, [&found]() { return found; });
+        }
+    }
 }
 
 template <typename NodeType>
@@ -435,8 +454,33 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
     trim_offset();
     assert(is_valid(graph));
 
+    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph);
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+    if (canonical && !range_graph)
+        range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph());
+
     if (!offset_) {
+        assert(std::all_of(nodes_.begin(), nodes_.end(), [&](auto node) {
+                               return graph.get_node_length(node) == graph.get_k();
+                           }));
         reverse_complement_seq_path(graph, sequence_, nodes_);
+
+    } else if (range_graph) {
+        assert(nodes_.size() == 1);
+
+        reverse_complement_seq_path(graph, sequence_, nodes_);
+        nodes_.resize(1);
+
+        if (!nodes_[0]) {
+            *this = Alignment();
+            return;
+        }
+
+        if (!canonical)
+            nodes_[0] = range_graph->toggle_node_sink_source(nodes_[0]);
+
+        assert(graph.get_k() - graph.get_node_length(nodes_[0]) == offset_);
+
     } else {
         assert(nodes_.size() == 1);
         // extract target sequence prefix
@@ -816,13 +860,23 @@ std::shared_ptr<const std::string> Alignment<NodeType>
         if (nodes_.size() == 1) {
             sequence_ = graph.get_node_sequence(nodes_.back()).substr(offset_);
         } else {
-            graph.call_outgoing_kmers(
-                *(nodes_.rbegin() + 1),
-                [&](auto node, char c) {
-                    if (node == nodes_.back())
-                        sequence_ += c;
-                }
-            );
+            char next = '\0';
+            graph.call_outgoing_kmers(*(nodes_.rbegin() + 1), [&](auto node, char c) {
+                if (node == nodes_.back())
+                    next = c;
+            });
+
+            if (!next) {
+                std::string seq = graph.get_node_sequence(nodes_.back());
+                std::string cur = graph.get_node_sequence(*(nodes_.rbegin() + 1));
+
+                if (!std::equal(cur.begin() + 1, cur.end(), seq.begin()))
+                    throw std::runtime_error("Invalid edge in JSON");
+
+                next = seq.back();
+            }
+
+            sequence_ += next;
         }
         const auto& edits = mapping[i]["edit"];
 
@@ -907,8 +961,15 @@ bool spell_path(const DeBruijnGraph &graph,
         });
 
         if (!next) {
-            std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
-            return false;
+            std::string next_seq = graph.get_node_sequence(path[i]);
+            std::string cur_seq = graph.get_node_sequence(path[i - 1]);
+            if (!std::equal(cur_seq.begin() + 1, cur_seq.end(), next_seq.begin())) {
+                std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
+                std::cerr << graph.get_node_sequence(path[i - 1]) << " " << graph.get_node_sequence(path[i]) << std::endl;
+                return false;
+            } else {
+                next = next_seq.back();
+            }
         }
 
         seq += next;

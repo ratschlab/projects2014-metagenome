@@ -1,6 +1,7 @@
 #include "canonical_dbg.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 
@@ -19,7 +20,8 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         alphabet_encoder_({ graph_.alphabet().size() }),
-        primary_(primary && !graph->is_canonical_mode()),
+        primary_(primary && !graph->is_canonical_mode()
+                     && !dynamic_cast<const DBGSuccinctRange*>(graph.get())),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
         rev_comp_cache_(primary_ ? 0 : cache_size),
@@ -71,7 +73,10 @@ void CanonicalDBG
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
     auto first_not_found = graph_.is_canonical_mode()
         ? path.end()
-        : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
+        : std::find_if(path.begin(), path.end(),
+                       [&](node_index node) {
+                           return graph_.get_node_length(node) < graph_.get_k();
+                       });
 
     for (auto jt = path.begin(); jt != first_not_found; ++jt) {
         if (terminate())
@@ -83,17 +88,37 @@ void CanonicalDBG
     if (first_not_found == path.end())
         return;
 
-    std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
-                        sequence.end());
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    size_t start = first_not_found - path.begin();
 
-    auto it = rev_path.rbegin();
+    std::string rev_seq(sequence.begin() + start, sequence.end());
+    std::vector<node_index> rev_path(path.begin() + start, path.end());
+    reverse_complement_seq_path(graph_, rev_seq, rev_path);
+    std::reverse(rev_path.begin(), rev_path.end());
+
+    if (path.size() > rev_path.size() + start) {
+        rev_path.resize(path.size() - start);
+    } else if (path.size() < rev_path.size() + start) {
+        path.resize(rev_path.size() + start);
+    }
+
+    assert(rev_path.size() + start == path.size());
+
+    auto it = rev_path.begin();
     for (auto jt = first_not_found; jt != path.end(); ++jt) {
-        assert(it != rev_path.rend());
+        assert(it != rev_path.end());
 
         if (terminate())
             return;
+
+        if (*it && *jt) {
+            size_t fwd_length = graph_.get_node_length(*jt);
+            size_t rev_length = graph_.get_node_length(*it);
+            if (fwd_length > rev_length) {
+                *it = DeBruijnGraph::npos;
+            } else if (fwd_length < rev_length) {
+                *jt = DeBruijnGraph::npos;
+            }
+        }
 
         if (*jt != DeBruijnGraph::npos) {
             if (!primary_)
@@ -122,6 +147,71 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
         map_to_nodes_sequentially(sequence, [&](node_index i) {
             callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
         }, terminate);
+    }
+}
+
+void CanonicalDBG::get_kmers_from_suffix(node_index node,
+                                         std::vector<node_index> &children) const {
+    std::string rev_seq = get_node_sequence(node).substr(1)
+        + std::string(1, boss::BOSS::kSentinel);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    const auto &alphabet = graph_.alphabet();
+
+    std::shared_ptr<const DBGSuccinctRange> range_graph;
+    const auto *range_cast = dynamic_cast<const DBGSuccinctRange*>(&graph_);
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+
+    if (range_cast) {
+        range_graph = std::shared_ptr<const DBGSuccinctRange>(range_graph, range_cast);
+    } else if (dbg_succ) {
+        range_graph = std::make_shared<const DBGSuccinctRange>(*dbg_succ);
+    }
+
+    if (range_graph) {
+        node_index next_range = range_graph->toggle_node_sink_source(
+            range_graph->kmer_to_node(rev_seq)
+        );
+
+        if (next_range) {
+            assert(range_graph->is_sink(next_range));
+            assert(range_graph->get_offset(next_range) == 1);
+            range_graph->call_incoming_kmers(next_range, [&](node_index next, char c) {
+                assert(range_graph->get_offset(next) == 0);
+                ::reverse_complement(&c, &c + 1);
+                auto i = alphabet_encoder_[c];
+                if (children[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
+                    return;
+
+                assert(!graph_.traverse(node, c));
+
+                if (!primary_)
+                    rev_comp_cache_.Put(next, next + offset_);
+
+                children[i] = next + offset_;
+            });
+        }
+
+        return;
+    }
+
+    node_index next;
+    for (size_t i = 0; i < alphabet.size(); ++i) {
+        char c = alphabet[i];
+
+        if (children[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
+            continue;
+
+        ::reverse_complement(&c, &c + 1);
+
+        rev_seq[0] = c;
+        next = graph_.kmer_to_node(rev_seq);
+        if (next != DeBruijnGraph::npos) {
+            assert(!graph_.traverse(node, alphabet[i]));
+            if (!primary_)
+                rev_comp_cache_.Put(next, next + offset_);
+
+            children[i] = next + offset_;
+        }
     }
 }
 
@@ -158,28 +248,8 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            node_index next;
-            std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            assert(rev_seq[0] == '\0');
-            for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (children[i] != DeBruijnGraph::npos)
-                    continue;
-
-                char c = alphabet[i];
-                ::reverse_complement(&c, &c + 1);
-
-                rev_seq[0] = c;
-                next = graph_.kmer_to_node(rev_seq);
-                if (next != DeBruijnGraph::npos) {
-                    if (!primary_)
-                        rev_comp_cache_.Put(next, next + offset_);
-
-                    children[i] = next + offset_;
-                }
-            }
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_suffix(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t i = 0; i < children.size(); ++i) {
@@ -187,6 +257,71 @@ void CanonicalDBG
                 callback(children[i], alphabet[i]);
                 assert(traverse(node, alphabet[i]) == children[i]);
             }
+        }
+    }
+}
+
+void CanonicalDBG::get_kmers_from_prefix(node_index node,
+                                         std::vector<node_index> &parents) const {
+    std::string rev_seq = std::string(1, boss::BOSS::kSentinel)
+        + get_node_sequence(node).substr(0, get_k() - 1);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    const auto &alphabet = graph_.alphabet();
+
+    std::shared_ptr<const DBGSuccinctRange> range_graph;
+    const auto *range_cast = dynamic_cast<const DBGSuccinctRange*>(&graph_);
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+
+    if (range_cast) {
+        range_graph = std::shared_ptr<const DBGSuccinctRange>(range_graph, range_cast);
+    } else if (dbg_succ) {
+        range_graph = std::make_shared<const DBGSuccinctRange>(*dbg_succ);
+    }
+
+    if (range_graph) {
+        node_index prev_range = range_graph->toggle_node_sink_source(
+            range_graph->kmer_to_node(rev_seq)
+        );
+
+        if (prev_range) {
+            assert(!range_graph->is_sink(prev_range));
+            assert(range_graph->get_offset(prev_range) == 1);
+            range_graph->call_outgoing_kmers(prev_range, [&](node_index prev, char c) {
+                assert(range_graph->get_offset(prev) == 0);
+                ::reverse_complement(&c, &c + 1);
+                auto i = alphabet_encoder_[c];
+                if (parents[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
+                    return;
+
+                assert(!graph_.traverse_back(node, c));
+
+                if (!primary_)
+                    rev_comp_cache_.Put(prev, prev + offset_);
+
+                parents[i] = prev + offset_;
+            });
+        }
+
+        return;
+    }
+
+    node_index prev;
+    for (size_t i = 0; i < alphabet.size(); ++i) {
+        char c = alphabet[i];
+
+        if (parents[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
+            continue;
+
+        ::reverse_complement(&c, &c + 1);
+
+        rev_seq.back() = c;
+        prev = graph_.kmer_to_node(rev_seq);
+        if (prev != DeBruijnGraph::npos) {
+            assert(!graph_.traverse_back(node, alphabet[i]));
+            if (!primary_)
+                rev_comp_cache_.Put(prev, prev + offset_);
+
+            parents[i] = prev + offset_;
         }
     }
 }
@@ -224,28 +359,8 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            node_index prev;
-            std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            assert(rev_seq.back() == '\0');
-            for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (parents[i] != DeBruijnGraph::npos)
-                    continue;
-
-                char c = alphabet[i];
-                ::reverse_complement(&c, &c + 1);
-
-                rev_seq.back() = c;
-                prev = graph_.kmer_to_node(rev_seq);
-                if (prev != DeBruijnGraph::npos) {
-                    if (!primary_)
-                        rev_comp_cache_.Put(prev, prev + offset_);
-
-                    parents[i] = prev + offset_;
-                }
-            }
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_prefix(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t i = 0; i < parents.size(); ++i) {
@@ -441,7 +556,10 @@ void CanonicalDBG::reverse_complement(std::string &seq,
         std::swap(path, rev_path);
 
     } else {
+        size_t old_size = path.size();
         path = map_sequence_to_nodes(*this, seq);
+        assert(path.size() == old_size || dynamic_cast<const DBGSuccinctRange*>(&graph_));
+        path.resize(old_size);
     }
 }
 

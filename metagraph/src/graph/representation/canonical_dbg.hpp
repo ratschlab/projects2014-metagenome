@@ -119,6 +119,9 @@ class CanonicalDBG : public DeBruijnGraph {
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override;
+    virtual size_t get_node_length(node_index index) const override {
+        return graph_.get_node_length(get_base_node(index));
+    }
 
     virtual size_t get_k() const override { return graph_.get_k(); }
 
@@ -183,6 +186,12 @@ class CanonicalDBG : public DeBruijnGraph {
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
     node_index reverse_complement(node_index node) const;
+
+    void get_kmers_from_prefix(node_index node,
+                               std::vector<node_index> &parents) const;
+
+    void get_kmers_from_suffix(node_index node,
+                               std::vector<node_index> &children) const;
 };
 
 } // namespace graph

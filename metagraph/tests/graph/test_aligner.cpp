@@ -6,6 +6,8 @@
 
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -96,9 +98,9 @@ get_extend(std::shared_ptr<const DeBruijnGraph> graph,
     auto uniconfig = config;
     uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
 
-    return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<>>(*graph, uniconfig).align(query)
-        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
+    auto range_graph = std::dynamic_pointer_cast<const DBGSuccinctRange>(graph);
+    return DBGAligner<UniMEMSeeder<>>(range_graph ? *range_graph : *graph,
+                                      uniconfig).align(query);
 }
 
 void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
@@ -1413,22 +1415,53 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
     }
 }
 
+TEST(DBGAlignerTest, align_low_similarity5) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/refs.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = std::dynamic_pointer_cast<DBGSuccinct>(
+        build_graph_batch<DBGSuccinct>(k, std::move(seqs), DBGMode::CANONICAL)
+    );
+    base_graph->reset_mask();
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
+
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/reads.fa", [&](auto *seq) {
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -4, -4));
+        config.gap_opening_penalty = -5;
+        config.gap_extension_penalty = -5;
+        config.xdrop = 27;
+        config.exact_kmer_match_fraction = 0.0;
+        config.max_nodes_per_seq_char = 10.0;
+        config.queue_size = 20;
+        config.num_alternative_paths = 1;
+        config.min_seed_length = 15;
+        config.min_path_score = 0;
+        config.min_cell_score = 0;
+
+        DBGAligner<> aligner(*graph, config);
+        auto paths = aligner.align(seq->seq.s);
+
+        ASSERT_EQ(1ull, paths.size()) << seq->name.s;
+    });
+}
+
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
-    graph->add_sequence(reference);
+    auto base_graph = std::make_shared<DBGSuccinct>(k);
+    base_graph->add_sequence(reference);
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
     {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 2;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+        DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -1453,16 +1486,15 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 1;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+        DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
 
-        EXPECT_EQ(9u, path.size()); // includes dummy k-mers
+        EXPECT_EQ(9u, path.size());
         EXPECT_EQ(reference.substr(3), path.get_sequence());
         EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
         EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
@@ -1486,20 +1518,20 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
-    graph->add_sequence(reference);
+    auto base_graph = std::make_shared<DBGSuccinct>(k);
+    base_graph->add_sequence(reference);
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(9u, path.size()); // includes dummy k-mers
+    EXPECT_EQ(9u, path.size());
     EXPECT_EQ(reference.substr(3), path.get_sequence());
     EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
     EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
@@ -1522,21 +1554,21 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     std::string reference = "AAAAA" "CTTTCGAGGCCAA";
     std::string query =     "GGGGG" "CTTTCGAGGCCAA";
 
-    auto graph = std::make_shared<DBGSuccinct>(k, true);
-    graph->add_sequence(reference);
+    auto base_graph = std::make_shared<DBGSuccinct>(k, true);
+    base_graph->add_sequence(reference);
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;
     config.min_seed_length = 13;
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(1u, path.size()); // includes dummy k-mers
+    ASSERT_EQ(1u, path.size());
     EXPECT_EQ(reference.substr(5), path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.substr(5), reference.substr(5)), path.get_score());
     EXPECT_EQ("5S13=", path.get_cigar().to_string());
@@ -1641,12 +1673,13 @@ TEST(DBGAlignerTest, align_dummy) {
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
+    auto base_graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_seed_length = k;
-    graph->add_sequence(reference);
+    base_graph->add_sequence(reference);
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -1674,14 +1707,15 @@ TEST(DBGAlignerTest, align_extended_delete_after_match) {
     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG"    "GCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG"    "CCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string query =       "CGTGGCCCAGGCCCAGGCCCAG" "TGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
-    auto graph = std::make_shared<DBGSuccinct>(k);
+    auto base_graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
     config.max_seed_length = k;
     config.min_seed_length = 15;
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+    base_graph->add_sequence(reference_1);
+    base_graph->add_sequence(reference_2);
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -1697,6 +1731,117 @@ TEST(DBGAlignerTest, align_extended_delete_after_match) {
                          paths.get_query_reverse_complement());
 
     check_extend(graph, aligner.get_config(), paths, query);
+}
+
+TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
+    size_t k = 18;
+    std::string reference = "TTGGCCTCGAAAG" "TTTTT";
+    std::string query =     "GGGGG" "CTTTCGAGGCCAA";
+    std::string ref_rev =   "AAAAA" "CTTTCGAGGCCAA";
+
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    dbg_succ->add_sequence(reference);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_seed_length = 13;
+
+    for (size_t max_seed_length : { k, k + 100}) {
+        config.max_seed_length = max_seed_length;
+        auto base_graph = std::make_shared<const DBGSuccinctRange>(*dbg_succ);
+        auto graph = std::make_shared<CanonicalDBG>(base_graph, true);
+        DBGAligner<> aligner(*graph, config);
+        auto paths = aligner.align(query);
+        ASSERT_EQ(1ull, paths.size());
+        auto path = paths.front();
+
+        EXPECT_EQ(1u, path.size()); // includes dummy k-mers
+        EXPECT_EQ(ref_rev.substr(5), path.get_sequence());
+        EXPECT_EQ(config.score_sequences(query.substr(5), ref_rev.substr(5)), path.get_score());
+        EXPECT_EQ("5S13=", path.get_cigar().to_string());
+        EXPECT_EQ(13u, path.get_num_matches());
+        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_EQ(5u, path.get_clipping());
+        EXPECT_EQ(0u, path.get_end_clipping());
+        EXPECT_EQ(5u, path.get_offset());
+        EXPECT_TRUE(path.is_valid(*graph, &config));
+        check_json_dump_load(*graph,
+                             path,
+                             paths.get_query(),
+                             paths.get_query_reverse_complement());
+    }
+}
+
+TEST(DBGAlignerTest, align_range_canonical_long) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = build_graph_batch<DBGSuccinct>(k, std::move(seqs));
+    dynamic_cast<DBGSuccinct*>(base_graph.get())->reset_mask();
+    auto range_graph = std::make_shared<DBGSuccinctRange>(base_graph);
+    auto graph = std::make_shared<CanonicalDBG>(*range_graph, true);
+
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/long_seq.fa", [&](auto *seq) {
+        std::string query = seq->seq.s;
+
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+        config.gap_opening_penalty = -5;
+        config.gap_extension_penalty = -2;
+        config.xdrop = 27;
+        config.exact_kmer_match_fraction = 0.0;
+        config.max_nodes_per_seq_char = 10.0;
+        config.queue_size = 20;
+        config.min_path_score = 0;
+        config.min_cell_score = 0;
+        config.min_seed_length = 15;
+        config.max_ram_per_alignment = 50000;
+
+        DBGAligner<UniMEMSeeder<>> aligner(*graph, config);
+        auto paths = aligner.align(query);
+
+        for (auto &path : paths) {
+            EXPECT_TRUE(path.is_valid(*graph, &config));
+            check_json_dump_load(*graph,
+                                 path,
+                                 paths.get_query(),
+                                 paths.get_query_reverse_complement());
+        }
+    });
+}
+
+TEST(DBGAlignerTest, align_canonical_nonprimary) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = build_graph_batch<DBGSuccinct>(k, std::move(seqs));
+    auto graph = std::make_shared<CanonicalDBG>(*base_graph, true);
+
+    std::string query = "ACACCTGTAATCCCAGCACTTTGGGAGGCCGA";
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.xdrop = 27;
+    config.exact_kmer_match_fraction = 0.0;
+    config.max_nodes_per_seq_char = 10.0;
+    config.queue_size = 20;
+    config.num_alternative_paths = 2;
+    config.min_path_score = 0;
+    config.min_cell_score = 0;
+
+    DBGAligner<UniMEMSeeder<>> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    ASSERT_EQ(1ull, paths.size());
+    EXPECT_EQ(64llu, paths[0].get_score()) << paths[0];
+    EXPECT_TRUE(paths[0].is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         paths[0],
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 }
 
 } // namespace
