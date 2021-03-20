@@ -279,7 +279,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 if (target_label.size()) {
                     for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
-                        if (config_.label.size() && label == config_.label) {
+                        if (config_.label.size() && label == target_label) {
                             signature_rc = t_signature;
                             break;
                         }

@@ -665,6 +665,9 @@ void DefaultColumnExtender<NodeType>
     size_t window_start = align_start - query_.data();
 
     for (const auto &[node, columns] : table_) {
+        if (node == graph_.max_index() + 1)
+            continue;
+
         size_t start = query_.size();
         size_t end = 0;
         size_t start_distance_from_origin = 0;

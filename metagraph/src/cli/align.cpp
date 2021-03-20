@@ -240,7 +240,7 @@ void map_sequences_in_file(const std::string &file,
 
         if (config.count_kmers) {
             std::sort(graphindices.begin(), graphindices.end());
-            size_t num_unique_matching_kmers = std::inner_product(
+            size_t num_unique_matching_kmers = graphindices.size() ? std::inner_product(
                 graphindices.begin() + 1, graphindices.end(),
                 graphindices.begin(),
                 size_t(graphindices.front() != DeBruijnGraph::npos),
@@ -248,7 +248,7 @@ void map_sequences_in_file(const std::string &file,
                 [](DeBruijnGraph::node_index next, DeBruijnGraph::node_index prev) {
                     return next != DeBruijnGraph::npos && next != prev;
                 }
-            );
+            ) : 0;
             *out << read_stream->name.s << "\t"
                  << num_discovered << "/" << num_kmers << "/"
                  << num_unique_matching_kmers << "\n";
