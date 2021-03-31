@@ -4,14 +4,12 @@
 #include <tsl/hopscotch_map.h>
 
 #include "dbg_aligner.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"
 
 namespace mtg {
 namespace graph {
-
-class AnnotatedDBG;
-
 namespace align {
 
 
@@ -195,7 +193,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
     typedef SeedAndExtendAlignerCore<AlignmentCompare> AlignerCore;
-    auto mapped_batch = map_and_label_query_batch(generate_query);
 
     size_t i = 0;
     generate_query([&](std::string_view header,
@@ -213,12 +210,19 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         Extender extender(anno_graph_, config_, this_query);
         Extender extender_rc(anno_graph_, config_, reverse);
 
-        const auto &[query_nodes_pair, target_columns] = mapped_batch;
-        assert(target_columns[i].size());
+        // const auto &[query_nodes_pair, target_columns] = mapped_batch;
+        // assert(target_columns[i].size());
 
-        const auto &[nodes, nodes_rc] = query_nodes_pair[i];
+        // const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 
-        for (const auto &[target_column, signature_pair] : target_columns[i]) {
+        // for (const auto &[target_column, signature_pair] : target_columns[i]) {
+        {
+            uint64_t target_column = ILabeledDBGAligner::kNTarget;
+            if (config_.label.size()) {
+                target_column = anno_graph_.get_annotation().get_label_encoder().encode(
+                    config_.label
+                );
+            }
             assert(target_column <= ILabeledDBGAligner::kNTarget);
             AlignerCore &aligner_core = labeled_aligner_cores.emplace(
                 target_column,
@@ -227,7 +231,41 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 }
             ).first.value();
 
-            const auto &[signature, signature_rc] = signature_pair;
+            std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
+            std::vector<node_index> nodes_rc;
+
+            // const auto &[signature, signature_rc] = signature_pair;
+            sdsl::bit_vector signature;
+            sdsl::bit_vector signature_rc;
+            for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
+                if (config_.label.size() && label == config_.label) {
+                    signature = t_signature;
+                    break;
+                }
+            }
+
+            if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+                    || config_.forward_and_reverse_complement) {
+                assert(!is_reverse_complement);
+                std::string dummy(query);
+                nodes_rc = nodes;
+                reverse_complement_seq_path(graph_, dummy, nodes_rc);
+                assert(dummy == aligner_core.get_paths().get_query(true));
+                assert(nodes_rc.size() == nodes.size());
+
+                for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
+                    if (config_.label.size() && label == config_.label) {
+                        signature_rc = t_signature;
+                        break;
+                    }
+                }
+            }
+
+            if (signature.empty() && config_.label.size()) {
+                callback(header, std::move(paths));
+                ++i;
+                return;
+            }
 
             Seeder seeder = build_seeder(
                 target_column,

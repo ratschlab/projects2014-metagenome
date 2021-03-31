@@ -53,6 +53,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
+    aligner_config.label = config.label;
 
     if (!aligner_config.min_seed_length)
         aligner_config.min_seed_length = k;

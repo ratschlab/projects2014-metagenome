@@ -297,6 +297,8 @@ Config::Config(int argc, char *argv[]) {
             kmers_in_single_form = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--label")) {
+            label = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-tips")) {
             min_tip_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-unitigs")) {

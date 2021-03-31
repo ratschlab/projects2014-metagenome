@@ -142,6 +142,7 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
+    std::string label = "";
     uint32_t max_path_length = 50;
     std::string linkage_file;
 

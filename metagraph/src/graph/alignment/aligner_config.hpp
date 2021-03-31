@@ -7,6 +7,7 @@
 #include <limits>
 #include <numeric>
 #include <string_view>
+#include <string>
 
 
 namespace mtg {
@@ -75,6 +76,8 @@ class DBGAlignerConfig {
     int8_t alignment_match_score;
     int8_t alignment_mm_transition_score;
     int8_t alignment_mm_transversion_score;
+
+    std::string label = "";
 
     bool check_config_scores() const;
 
