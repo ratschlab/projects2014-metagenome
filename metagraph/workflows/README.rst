@@ -20,13 +20,11 @@ common scenarios (such as indexing of SRA experiments or collections of referenc
 
 Indexing reference sequences
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 (basic graphs)
 
 Indexing SRA experiments
 ^^^^^^^^^^^^^^^^^^^^^^^^
-
-(basic graphs)
+(canonical/primary graphs)
 
 
 Given some raw sequence data and a few parameters like the k-mer size, graphs and annotations
