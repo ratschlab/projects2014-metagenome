@@ -18,6 +18,17 @@ which requires performing specific operations and takes multiple steps.
 This package uses Snakemake to perform the entire indexing process with a single command for the most
 common scenarios (such as indexing of SRA experiments or collections of reference sequences).
 
+Indexing reference sequences
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+(basic graphs)
+
+Indexing SRA experiments
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+(basic graphs)
+
+
 Given some raw sequence data and a few parameters like the k-mer size, graphs and annotations
 are automatically built:
 
