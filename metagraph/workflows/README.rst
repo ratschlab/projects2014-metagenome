@@ -2,18 +2,23 @@
 metagraph_workflows
 ===================
 
-This package provides workflows for the `metagraph framework
-<https://metagraph.ethz.ch>`_ Currently, these include workflows to build graphs and
-annotations from sequences.
+This package provides workflows for the `MetaGraph framework
+<https://metagraph.ethz.ch>`_.
+Currently, these include workflows for indexing (construction of graphs and
+annotations from large collections of sequences).
 
 
-Workflows for Creating Graphs and Annotations
----------------------------------------------
+Indexing workflows
+------------------
 
-Since the creation of graph and indices comprises several steps, this package provides
-some support to simplify these tasks - in particular for standard cases.
+MetaGraph allows indexing very large collections of sequences using compressed data structures.
+The workflows in MetaGraph are designed to make the construction very efficient and scalable,
+which requires performing specific operations and takes multiple steps.
 
-Given some raw sequence data and a few options like the kmer size (`k`) graphs and annotations
+This package uses Snakemake to perform the entire indexing process with a single command for the most
+common scenarios (such as indexing of SRA experiments or collections of reference sequences).
+
+Given some raw sequence data and a few parameters like the k-mer size, graphs and annotations
 are automatically built:
 
 .. code-block:: bash

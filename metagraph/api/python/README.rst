@@ -31,4 +31,3 @@ Usage
 
 For more examples, see `notebooks
 <./notebooks>`_.
-
