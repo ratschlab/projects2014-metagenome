@@ -234,6 +234,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                     }
                 } else {
                     target_column = label_encoder.encode(config_.label);
+                    target_label = config_.label;
                 }
             }
             common::logger->trace("Target column {}", target_column);
@@ -251,11 +252,20 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             // const auto &[signature, signature_rc] = signature_pair;
             sdsl::bit_vector signature;
             sdsl::bit_vector signature_rc;
-            for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
-                if (label == target_label) {
-                    signature = t_signature;
-                    break;
+
+            if (target_label.size()) {
+                for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
+                    if (label == target_label) {
+                        signature = t_signature;
+                        break;
+                    }
                 }
+            }
+
+            if (signature.empty()) {
+                callback(header, std::move(paths));
+                ++i;
+                return;
             }
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -267,19 +277,22 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 assert(dummy == aligner_core.get_paths().get_query(true));
                 assert(nodes_rc.size() == nodes.size());
 
-                for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
-                    if (config_.label.size() && label == config_.label) {
-                        signature_rc = t_signature;
-                        break;
+                if (target_label.size()) {
+                    for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
+                        if (config_.label.size() && label == config_.label) {
+                            signature_rc = t_signature;
+                            break;
+                        }
                     }
+                }
+
+                if (signature_rc.empty()) {
+                    callback(header, std::move(paths));
+                    ++i;
+                    return;
                 }
             }
 
-            if (signature.empty() && target_label.size()) {
-                callback(header, std::move(paths));
-                ++i;
-                return;
-            }
 
             Seeder seeder = build_seeder(
                 target_column,
