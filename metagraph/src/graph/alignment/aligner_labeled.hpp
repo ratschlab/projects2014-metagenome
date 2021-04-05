@@ -219,17 +219,24 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         // for (const auto &[target_column, signature_pair] : target_columns[i]) {
         {
             uint64_t target_column = ILabeledDBGAligner::kNTarget;
+            std::string target_label;
             if (config_.label.size()) {
                 const auto &label_encoder = anno_graph_.get_annotation().get_label_encoder();
                 if (config_.label == "HEADER") {
                     std::string test(header);
                     test = utils::split_string(test, ".")[0];
-                    if (label_encoder.label_exists(test))
+                    if (label_encoder.label_exists(test)) {
+                        common::logger->trace("Found label {}", test);
                         target_column = label_encoder.encode(test);
+                        target_label = test;
+                    } else {
+                        common::logger->trace("Label {} not found", test);
+                    }
                 } else {
                     target_column = label_encoder.encode(config_.label);
                 }
             }
+            common::logger->trace("Target column {}", target_column);
             assert(target_column <= ILabeledDBGAligner::kNTarget);
             AlignerCore &aligner_core = labeled_aligner_cores.emplace(
                 target_column,
@@ -245,7 +252,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             sdsl::bit_vector signature;
             sdsl::bit_vector signature_rc;
             for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
-                if (config_.label.size() && label == config_.label) {
+                if (label == target_label) {
                     signature = t_signature;
                     break;
                 }
@@ -268,7 +275,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 }
             }
 
-            if (signature.empty() && config_.label.size()) {
+            if (signature.empty() && target_label.size()) {
                 callback(header, std::move(paths));
                 ++i;
                 return;
