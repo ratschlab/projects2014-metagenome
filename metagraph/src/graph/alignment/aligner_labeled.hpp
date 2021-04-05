@@ -220,15 +220,14 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         {
             uint64_t target_column = ILabeledDBGAligner::kNTarget;
             if (config_.label.size()) {
+                const auto &label_encoder = anno_graph_.get_annotation().get_label_encoder();
                 if (config_.label == "HEADER") {
-                    std::string test(header.substr(1));
-                    target_column = anno_graph_.get_annotation().get_label_encoder().encode(
-                        utils::split_string(test, ".")[0]
-                    );
+                    std::string test(header);
+                    test = utils::split_string(test, ".")[0];
+                    if (label_encoder.label_exists(test))
+                        target_column = label_encoder.encode(test);
                 } else {
-                    target_column = anno_graph_.get_annotation().get_label_encoder().encode(
-                        config_.label
-                    );
+                    target_column = label_encoder.encode(config_.label);
                 }
             }
             assert(target_column <= ILabeledDBGAligner::kNTarget);
