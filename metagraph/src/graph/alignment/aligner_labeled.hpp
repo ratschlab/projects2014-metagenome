@@ -7,6 +7,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/utils/string_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -219,9 +220,16 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         {
             uint64_t target_column = ILabeledDBGAligner::kNTarget;
             if (config_.label.size()) {
-                target_column = anno_graph_.get_annotation().get_label_encoder().encode(
-                    config_.label
-                );
+                if (config_.label == "HEADER") {
+                    std::string test(header.substr(1));
+                    target_column = anno_graph_.get_annotation().get_label_encoder().encode(
+                        utils::split_string(test, ".")[0]
+                    );
+                } else {
+                    target_column = anno_graph_.get_annotation().get_label_encoder().encode(
+                        config_.label
+                    );
+                }
             }
             assert(target_column <= ILabeledDBGAligner::kNTarget);
             AlignerCore &aligner_core = labeled_aligner_cores.emplace(
