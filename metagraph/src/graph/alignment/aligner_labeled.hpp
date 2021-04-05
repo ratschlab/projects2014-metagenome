@@ -219,17 +219,25 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         // for (const auto &[target_column, signature_pair] : target_columns[i]) {
         {
             uint64_t target_column = ILabeledDBGAligner::kNTarget;
+            std::string target_label;
             if (config_.label.size()) {
                 const auto &label_encoder = anno_graph_.get_annotation().get_label_encoder();
                 if (config_.label == "HEADER") {
                     std::string test(header);
                     test = utils::split_string(test, ".")[0];
-                    if (label_encoder.label_exists(test))
+                    if (label_encoder.label_exists(test)) {
+                        common::logger->trace("Found label {}", test);
                         target_column = label_encoder.encode(test);
+                        target_label = test;
+                    } else {
+                        common::logger->trace("Label {} not found", test);
+                    }
                 } else {
                     target_column = label_encoder.encode(config_.label);
+                    target_label = config_.label;
                 }
             }
+            common::logger->trace("Target column {}", target_column);
             assert(target_column <= ILabeledDBGAligner::kNTarget);
             AlignerCore &aligner_core = labeled_aligner_cores.emplace(
                 target_column,
@@ -244,11 +252,20 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             // const auto &[signature, signature_rc] = signature_pair;
             sdsl::bit_vector signature;
             sdsl::bit_vector signature_rc;
-            for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
-                if (config_.label.size() && label == config_.label) {
-                    signature = t_signature;
-                    break;
+
+            if (target_label.size()) {
+                for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(query, anno_graph_.get_annotation().num_labels())) {
+                    if (label == target_label) {
+                        signature = t_signature;
+                        break;
+                    }
                 }
+            }
+
+            if (signature.empty()) {
+                callback(header, std::move(paths));
+                ++i;
+                return;
             }
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -260,19 +277,22 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 assert(dummy == aligner_core.get_paths().get_query(true));
                 assert(nodes_rc.size() == nodes.size());
 
-                for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
-                    if (config_.label.size() && label == config_.label) {
-                        signature_rc = t_signature;
-                        break;
+                if (target_label.size()) {
+                    for (auto &[label, t_signature] : anno_graph_.get_top_label_signatures(dummy, anno_graph_.get_annotation().num_labels())) {
+                        if (config_.label.size() && label == config_.label) {
+                            signature_rc = t_signature;
+                            break;
+                        }
                     }
+                }
+
+                if (signature_rc.empty()) {
+                    callback(header, std::move(paths));
+                    ++i;
+                    return;
                 }
             }
 
-            if (signature.empty() && config_.label.size()) {
-                callback(header, std::move(paths));
-                ++i;
-                return;
-            }
 
             Seeder seeder = build_seeder(
                 target_column,
