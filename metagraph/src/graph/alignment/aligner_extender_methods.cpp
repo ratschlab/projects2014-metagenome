@@ -116,6 +116,33 @@ bool update_column(const DeBruijnGraph &graph_,
     // compute column boundaries for updating the match and deletion scores
     ssize_t offset_diff = static_cast<ssize_t>(offset_prev) - offset;
 
+    bool updated = false;
+
+    size_t i = std::get<0>(prev_node) == graph_.max_index() + 1 ? 2 - offset : 1;
+    auto update_max = [&xdrop_cutoff,&updated,&config_,ninf=ninf,
+                       S=S.data(),E=E.data(),F=F.data(),
+                       OS=OS.data(),OE=OE.data(),OF=OF.data(),
+                       PS=PS.data(),PF=PF.data()](size_t i) {
+        if (S[i] < xdrop_cutoff || S[i] < ninf) {
+            S[i] = ninf;
+            E[i] = ninf;
+            F[i] = ninf;
+            OS[i] = Cigar::CLIPPED;
+            OE[i] = Cigar::CLIPPED;
+            OF[i] = Cigar::CLIPPED;
+            PS[i] = Extender::NONE;
+            PF[i] = Extender::NONE;
+        } else if (S[i] <= 0) {
+            S[i] = 0;
+            OS[i] = Cigar::CLIPPED;
+            PS[i] = Extender::NONE;
+            updated = true;
+        } else {
+            xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
+            updated = true;
+        }
+    };
+
     if (std::get<0>(prev_node) != graph_.max_index() + 1) {
         // to define the boundaries for match scores
         // need i + offset - offset_prev - 1 >= 0
@@ -220,42 +247,25 @@ bool update_column(const DeBruijnGraph &graph_,
             mm_maskstorel_epi8((int8_t*)&OS[i], mask, _mm_set1_epi8(Cigar::DELETION));
         }
 #endif
+
+        for (size_t j = 0; j < i; ++j) {
+            update_max(j);
+        }
+
     } else {
         assert(!std::get<2>(prev_node));
+        assert(offset <= 1);
+
         S[1 - offset] = seed_.get_score();
         OS[1 - offset] = seed_.get_cigar().back().first;
         PS[1 - offset] = Extender::PREV;
-    }
+        updated = true;
 
-    bool updated = false;
-    auto update_max = [&xdrop_cutoff,&updated,&config_,ninf=ninf,
-                       S=S.data(),E=E.data(),F=F.data(),
-                       OS=OS.data(),OE=OE.data(),OF=OF.data(),
-                       PS=PS.data(),PF=PF.data()](size_t i) {
-        if (S[i] < xdrop_cutoff || S[i] < ninf) {
-            S[i] = ninf;
-            E[i] = ninf;
-            F[i] = ninf;
-            OS[i] = Cigar::CLIPPED;
-            OE[i] = Cigar::CLIPPED;
-            OF[i] = Cigar::CLIPPED;
-            PS[i] = Extender::NONE;
-            PF[i] = Extender::NONE;
-        } else if (S[i] <= 0) {
-            S[i] = 0;
-            OS[i] = Cigar::CLIPPED;
-            PS[i] = Extender::NONE;
-            updated = true;
-        } else {
-            xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
-            updated = true;
-        }
-    };
+        xdrop_cutoff = std::max(xdrop_cutoff, seed_.get_score() - config_.xdrop);
 
-    size_t i = std::get<0>(prev_node) == graph_.max_index() + 1 ? 2 - offset : 1;
-
-    for (size_t j = 0; j < i; ++j) {
-        update_max(j);
+        // assert(PS[1 - offset] == Extender::PREV);
+        // assert(OS[1 - offset] == seed_.get_cigar().back().first);
+        // assert(S[1 - offset] == seed_.get_score());
     }
 
     for ( ; i < cur_size; ++i) {
@@ -310,23 +320,11 @@ bool update_column(const DeBruijnGraph &graph_,
         }
     }
 
-#ifndef NDEBUG
-    if (std::get<0>(prev_node) == graph_.max_index() + 1) {
-        assert(offset <= 1);
-        assert(PS[1 - offset] == Extender::PREV);
-        assert(OS[1 - offset] == seed_.get_cigar().back().first);
-        assert(S[1 - offset] == seed_.get_score());
-    }
-
-    if (offset <= 1 && OS[1 - offset] != Cigar::DELETION && OS[1 - offset] != Cigar::CLIPPED) {
-        assert(std::get<0>(prev_node) == graph_.max_index() + 1);
-    }
-
-#endif
+    assert(offset > 1 || OS[1 - offset] == Cigar::DELETION
+        || OS[1 - offset] == Cigar::CLIPPED
+        || std::get<0>(prev_node) == graph_.max_index() + 1);
 
     // make sure that the first operation taken matches the seed
-    std::ignore = graph_;
-    std::ignore = seed_;
     assert(std::get<0>(prev_node) != graph_.max_index() + 1 || std::get<2>(prev_node)
         || (offset <= 1 && S[1 - offset] == seed_.get_score()
             && OS[1 - offset] == seed_.get_cigar().back().first
@@ -336,155 +334,6 @@ bool update_column(const DeBruijnGraph &graph_,
     assert(max_pos < size);
 
     return updated;
-}
-
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::backtrack(score_t min_path_score,
-            AlignNode best_node,
-            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-            std::vector<DBGAlignment> &extensions) const -> std::vector<AlignNode> {
-    assert(std::get<3>(best_node));
-    size_t size = query_.size() - start_ + 1;
-    Cigar cigar;
-    std::vector<NodeType> path;
-    std::vector<AlignNode> track;
-    std::string seq;
-    NodeType start_node = DeBruijnGraph::npos;
-
-    assert(table_.count(std::get<0>(best_node)));
-    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
-
-    score_t max_score = S[max_pos - offset];
-    score_t score = max_score;
-    Cigar::Operator last_op = OS[max_pos - offset];
-    assert(last_op == Cigar::MATCH);
-
-    if (max_pos + 1 < size)
-        cigar.append(Cigar::CLIPPED, size - max_pos - 1);
-
-    size_t pos = max_pos;
-    while (true) {
-        assert(table_.count(std::get<0>(best_node)));
-        const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-            = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
-
-        prev_starts.emplace(best_node);
-
-        assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
-        last_op = OS[pos - offset];
-
-        if (last_op == Cigar::CLIPPED || S[pos - offset] == 0) {
-            assert(S[pos - offset] != ninf);
-            score -= S[pos - offset];
-            max_score = score;
-            break;
-        } else if (pos == 1 && last_op != Cigar::DELETION) {
-            assert(std::get<0>(prev) == graph_.max_index() + 1);
-            assert(std::get<0>(best_node) == seed_->back());
-            assert(!std::get<2>(best_node));
-            assert(last_op == seed_->get_cigar().back().first);
-            assert(seed_->get_score() == S[pos - offset]);
-
-            score -= S[pos - offset];
-            start_node = seed_->back();
-            break;
-        }
-
-        switch (last_op) {
-            case Cigar::MATCH:
-            case Cigar::MISMATCH: {
-                assert(pos);
-                cigar.append(last_op);
-                path.push_back(std::get<0>(best_node));
-                track.push_back(best_node);
-                seq += std::get<1>(best_node);
-                assert((last_op == Cigar::MATCH)
-                    == (graph_.get_node_sequence(std::get<0>(best_node)).back()
-                        == extend_window_[pos - 1]));
-                switch (PS[pos - offset]) {
-                    case PREV: { best_node = prev; } break;
-                    case CUR: {} break;
-                    case NONE: { assert(false); }
-                }
-                --pos;
-            } break;
-            case Cigar::INSERTION: {
-                assert(PS[pos - offset] == CUR);
-                while (last_op == Cigar::INSERTION) {
-                    assert(pos);
-                    last_op = OE[pos - offset];
-                    assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
-                    cigar.append(Cigar::INSERTION);
-                    --pos;
-                }
-            } break;
-            case Cigar::DELETION: {
-                while (last_op == Cigar::DELETION) {
-                    assert(table_.count(std::get<0>(best_node)));
-                    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-                        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
-                    last_op = OF[pos - offset];
-                    assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
-                    path.push_back(std::get<0>(best_node));
-                    track.push_back(best_node);
-                    seq += std::get<1>(best_node);
-                    cigar.append(Cigar::DELETION);
-                    switch (PF[pos - offset]) {
-                        case PREV: { best_node = prev; } break;
-                        case CUR: {} break;
-                        case NONE: { assert(false); }
-                    }
-                    prev_starts.emplace(best_node);
-                }
-            } break;
-            case Cigar::CLIPPED: { assert(false); }
-        }
-    }
-
-    if (max_score < min_path_score)
-        return {};
-
-    if (pos > 1)
-        cigar.append(Cigar::CLIPPED, pos - 1);
-
-    assert(path.size() == track.size());
-
-    std::reverse(cigar.begin(), cigar.end());
-    std::reverse(path.begin(), path.end());
-    std::reverse(seq.begin(), seq.end());
-
-    Alignment<NodeType> extension(
-        { extend_window_.data() + pos, max_pos - pos },
-        std::move(path), std::move(seq), score, std::move(cigar),
-        0, seed_->get_orientation(), graph_.get_k() - 1
-    );
-
-    std::ignore = config_;
-    assert(extension.is_valid(graph_, &config_));
-    extension.extend_query_end(query_.data() + query_.size());
-
-    if (start_node) {
-        auto next_path = *seed_;
-        next_path.append(std::move(extension));
-        next_path.trim_offset();
-        track.resize(next_path.size());
-        assert(next_path.is_valid(graph_, &config_));
-
-        DEBUG_LOG("Alignment (extended): {}", next_path);
-        extensions.emplace_back(std::move(next_path));
-    } else {
-        extension.extend_query_begin(query_.data());
-        extension.trim_offset();
-        track.resize(extension.size());
-        assert(extension.is_valid(graph_, &config_));
-
-        DEBUG_LOG("Alignment (trim seed): {}", extension);
-        extensions.emplace_back(std::move(extension));
-    }
-
-    return track;
 }
 
 template <typename NodeType>
@@ -712,6 +561,155 @@ bool DefaultColumnExtender<NodeType>
                        const AlignNode &) const {
     return extensions.size() >= config_.num_alternative_paths
         && extensions.back().get_score() < extensions.front().get_score();
+}
+
+template <typename NodeType>
+auto DefaultColumnExtender<NodeType>
+::backtrack(score_t min_path_score,
+            AlignNode best_node,
+            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+            std::vector<DBGAlignment> &extensions) const -> std::vector<AlignNode> {
+    assert(std::get<3>(best_node));
+    size_t size = query_.size() - start_ + 1;
+    Cigar cigar;
+    std::vector<NodeType> path;
+    std::vector<AlignNode> track;
+    std::string seq;
+    NodeType start_node = DeBruijnGraph::npos;
+
+    assert(table_.count(std::get<0>(best_node)));
+    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
+
+    score_t max_score = S[max_pos - offset];
+    score_t score = max_score;
+    Cigar::Operator last_op = OS[max_pos - offset];
+    assert(last_op == Cigar::MATCH);
+
+    if (max_pos + 1 < size)
+        cigar.append(Cigar::CLIPPED, size - max_pos - 1);
+
+    size_t pos = max_pos;
+    while (true) {
+        assert(table_.count(std::get<0>(best_node)));
+        const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+            = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
+
+        prev_starts.emplace(best_node);
+
+        assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
+        last_op = OS[pos - offset];
+
+        if (last_op == Cigar::CLIPPED || S[pos - offset] == 0) {
+            assert(S[pos - offset] != ninf);
+            score -= S[pos - offset];
+            max_score = score;
+            break;
+        } else if (pos == 1 && last_op != Cigar::DELETION) {
+            assert(std::get<0>(prev) == graph_.max_index() + 1);
+            assert(std::get<0>(best_node) == seed_->back());
+            assert(!std::get<2>(best_node));
+            assert(last_op == seed_->get_cigar().back().first);
+            assert(seed_->get_score() == S[pos - offset]);
+
+            score -= S[pos - offset];
+            start_node = seed_->back();
+            break;
+        }
+
+        switch (last_op) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(pos);
+                cigar.append(last_op);
+                path.push_back(std::get<0>(best_node));
+                track.push_back(best_node);
+                seq += std::get<1>(best_node);
+                assert((last_op == Cigar::MATCH)
+                    == (graph_.get_node_sequence(std::get<0>(best_node)).back()
+                        == extend_window_[pos - 1]));
+                switch (PS[pos - offset]) {
+                    case PREV: { best_node = prev; } break;
+                    case CUR: {} break;
+                    case NONE: { assert(false); }
+                }
+                --pos;
+            } break;
+            case Cigar::INSERTION: {
+                assert(PS[pos - offset] == CUR);
+                while (last_op == Cigar::INSERTION) {
+                    assert(pos);
+                    last_op = OE[pos - offset];
+                    assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
+                    cigar.append(Cigar::INSERTION);
+                    --pos;
+                }
+            } break;
+            case Cigar::DELETION: {
+                while (last_op == Cigar::DELETION) {
+                    assert(table_.count(std::get<0>(best_node)));
+                    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+                        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
+                    last_op = OF[pos - offset];
+                    assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
+                    path.push_back(std::get<0>(best_node));
+                    track.push_back(best_node);
+                    seq += std::get<1>(best_node);
+                    cigar.append(Cigar::DELETION);
+                    switch (PF[pos - offset]) {
+                        case PREV: { best_node = prev; } break;
+                        case CUR: {} break;
+                        case NONE: { assert(false); }
+                    }
+                    prev_starts.emplace(best_node);
+                }
+            } break;
+            case Cigar::CLIPPED: { assert(false); }
+        }
+    }
+
+    if (max_score < min_path_score)
+        return {};
+
+    if (pos > 1)
+        cigar.append(Cigar::CLIPPED, pos - 1);
+
+    assert(path.size() == track.size());
+
+    std::reverse(cigar.begin(), cigar.end());
+    std::reverse(path.begin(), path.end());
+    std::reverse(seq.begin(), seq.end());
+
+    Alignment<NodeType> extension(
+        { extend_window_.data() + pos, max_pos - pos },
+        std::move(path), std::move(seq), score, std::move(cigar),
+        0, seed_->get_orientation(), graph_.get_k() - 1
+    );
+
+    std::ignore = config_;
+    assert(extension.is_valid(graph_, &config_));
+    extension.extend_query_end(query_.data() + query_.size());
+
+    if (start_node) {
+        auto next_path = *seed_;
+        next_path.append(std::move(extension));
+        next_path.trim_offset();
+        track.resize(next_path.size());
+        assert(next_path.is_valid(graph_, &config_));
+
+        DEBUG_LOG("Alignment (extended): {}", next_path);
+        extensions.emplace_back(std::move(next_path));
+    } else {
+        extension.extend_query_begin(query_.data());
+        extension.trim_offset();
+        track.resize(extension.size());
+        assert(extension.is_valid(graph_, &config_));
+
+        DEBUG_LOG("Alignment (trim seed): {}", extension);
+        extensions.emplace_back(std::move(extension));
+    }
+
+    return track;
 }
 
 template <typename NodeType>
