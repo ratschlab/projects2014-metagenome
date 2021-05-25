@@ -339,220 +339,577 @@ bool update_column(const DeBruijnGraph &graph_,
 template <typename NodeType>
 auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         -> std::vector<DBGAlignment> {
-    const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
-    start_ = align_start - query_.data();
-    size_t size = query_.size() - start_ + 1;
-    assert(start_ + size == partial_sums_.size());
+    std::vector<DBGAlignment> extensions;
 
-    extend_window_ = std::string_view{ align_start, size - 1 };
-    DEBUG_LOG("Extend query window: {}", extend_window_);
-    assert(extend_window_[0] == seed_->get_query().back());
+    std::vector<std::tuple<std::vector<score_t>, std::vector<score_t>, std::vector<score_t>,
+                           std::vector<Cigar::Operator>, std::vector<Cigar::Operator>, std::vector<Cigar::Operator>,
+                           std::vector<size_t>, std::vector<size_t>,
+                           NodeType, char, size_t, size_t>> table;
 
-    auto &first_column = table_.emplace(
-        graph_.max_index() + 1,
-        Column{ { std::make_tuple(
-            ScoreVec(1, ninf), ScoreVec(1, ninf), ScoreVec(1, ninf),
-            OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED),
-            AlignNode{}, PrevVec(1, NONE), PrevVec(1, NONE),
-            0 /* offset */, 0 /* max_pos */
-        ) }, false }
-    ).first.value().first[0];
-    sanitize(first_column, ninf);
-    auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = first_column;
+    std::string_view window(seed_->get_query().data(),
+                            query_.data() + query_.size() - seed_->get_query().data());
 
-    size_t num_columns = 1;
-    constexpr size_t column_vector_size = sizeof(std::pair<NodeType, std::pair<Column, bool>>);
+    size_t start = seed_->get_query().data() - query_.data();
+    const score_t *partial = partial_sums_.data() + start;
+    assert(*partial == config_.match_score(window));
 
-    auto get_column_size = [&](const Scores &scores) {
-        size_t size = std::get<0>(scores).capacity();
-        return sizeof(Scores) + size * (
-            sizeof(score_t) * 3 + sizeof(Cigar::Operator) * 3 + sizeof(NodeId) * 2
-        );
-    };
-    size_t total_size = column_vector_size + get_column_size(first_column);
+    table.emplace_back(std::vector<score_t>(window.size() + 1, ninf),
+                       std::vector<score_t>(window.size() + 1, ninf),
+                       std::vector<score_t>(window.size() + 1, ninf),
+                       std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                       std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                       std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                       std::vector<size_t>(window.size() + 1, -1),
+                       std::vector<size_t>(window.size() + 1, -1),
+                       graph_.max_index() + 1, '\0', seed_->get_offset() - 1, 0);
 
-    S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start_ + 1];
+    score_t xdrop = config_.xdrop;
+    score_t xdrop_cutoff = -xdrop;
 
-    typedef std::tuple<score_t, size_t, AlignNode, size_t> Ref;
-    Ref best_start{ S[0], max_pos, start_node_, offset + S.size() };
-    std::vector<Ref> starts;
+    // std::cerr << "start\t" << *seed_ << "\n";
 
-    struct RefLess {
-        bool operator()(const Ref &a, const Ref &b) const {
-            return std::make_pair(std::get<0>(a), -std::get<3>(a))
-                < std::make_pair(std::get<0>(b), -std::get<3>(b));
-        }
-    };
+    {
+        auto &[S, E, F, OS, OE, OF, PS, PF, node, c, offset, max_pos] = table[0];
+        S[0] = 0;
 
-    struct RefGreater {
-        bool operator()(const Ref &a, const Ref &b) const {
-            return std::make_pair(std::get<0>(a), std::get<1>(a))
-                > std::make_pair(std::get<0>(b), std::get<1>(b));
-        }
-    };
+        for (size_t j = 1; j < S.size(); ++j) {
+            S[j] = config_.gap_opening_penalty + (j - 1) * config_.gap_extension_penalty;
+            E[j] = S[j];
+            OS[j] = Cigar::INSERTION;
+            OE[j] = j == 1 ? Cigar::MATCH : Cigar::INSERTION;
+            PS[j] = 0;
 
-    std::priority_queue<Ref, std::vector<Ref>, RefLess> stack;
-    stack.emplace(S[0], max_pos, start_node_, offset + S.size());
-
-    while (stack.size()) {
-        AlignNode prev = std::get<2>(stack.top());
-        score_t last_score = std::get<0>(stack.top());
-
-        stack.pop();
-
-        if (last_score < xdrop_cutoff_)
-            continue;
-
-        bool continue_traversal = true;
-        while (continue_traversal) {
-            continue_traversal = false;
-
-            if (static_cast<double>(total_size) / 1000000
-                    > config_.max_ram_per_alignment) {
-                DEBUG_LOG("Alignment RAM limit reached, stopping extension");
-                stack = decltype(stack)();
+            if (S[j] < xdrop_cutoff)
                 break;
-            }
-
-            if (static_cast<double>(std::get<3>(prev)) / extend_window_.size()
-                    > config_.max_nodes_per_seq_char) {
-                DEBUG_LOG("Alignment reached too far, skipping");
-                break;
-            }
-
-            bool prev_converged = table_[std::get<0>(prev)].second;
-
-            auto outgoing = get_outgoing(prev);
-
-            for (const auto &cur : outgoing) {
-                const auto &[next, c, depth, next_distance_from_origin] = cur;
-                auto &column_pair = table_[next];
-                auto &[column, converged] = column_pair;
-                assert(depth == column.size());
-                assert(next_distance_from_origin == std::get<3>(prev) + 1);
-
-                if (prev_converged && converged) {
-                    pop(cur);
-                    continue;
-                }
-
-                assert(table_.count(std::get<0>(prev)));
-                auto &column_prev = table_[std::get<0>(prev)];
-
-                xdrop_cutoff_ = std::get<0>(best_start) - config_.xdrop;
-
-                // compute bandwidth based on xdrop criterion
-                auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff_);
-                if (min_i >= max_i) {
-                    pop(cur);
-                    continue;
-                }
-
-                max_i = std::min(max_i + 1, size);
-
-                size_t cur_size = max_i - min_i;
-
-                Scores next_column(ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
-                                   ScoreVec(cur_size, ninf), OpVec(cur_size, Cigar::CLIPPED),
-                                   OpVec(cur_size, Cigar::CLIPPED),
-                                   OpVec(cur_size, Cigar::CLIPPED),
-                                   prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
-                                   min_i /* offset */, 0 /* max_pos */);
-                sanitize(next_column, std::get<0>(best_start));
-
-                bool updated = update_column<NodeType>(
-                    graph_, config_, column_prev, next_column, c, start_, size,
-                    xdrop_cutoff_, profile_score_, profile_op_, *seed_
-                );
-
-                auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
-
-                auto max_it = S.begin() + (max_pos - offset);
-
-                converged = !updated || has_converged(column_pair, next_column);
-
-                const score_t *match = &partial_sums_[start_ + offset];
-                bool extendable = false;
-                for (size_t i = 0; i < S.size() && !extendable; ++i) {
-                    if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
-                        extendable = true;
-                }
-
-                bool add_to_table = false;
-                if (OS[max_pos - offset] == Cigar::MATCH && *max_it > std::get<0>(best_start)) {
-                    std::get<3>(best_start) = offset + S.size();
-                    std::get<2>(best_start) = cur;
-                    std::get<1>(best_start) = max_pos;
-                    std::get<0>(best_start) = *max_it;
-                    add_to_table = true;
-                }
-
-                assert(xdrop_cutoff_ == std::get<0>(best_start) - config_.xdrop);
-
-                if (*max_it >= xdrop_cutoff_ && extendable) {
-                    if (outgoing.size() == 1) {
-                        prev = cur;
-                        continue_traversal = true;
-                    } else {
-                        stack.emplace(*max_it, max_pos, cur, offset + S.size());
-                    }
-                    add_to_table = true;
-                }
-
-                if (add_to_table) {
-                    if (OS[max_pos - offset] == Cigar::MATCH)
-                        starts.emplace_back(*max_it, max_pos, cur, offset + S.size());
-
-                    sanitize(next_column, std::get<0>(best_start));
-
-                    total_size += get_column_size(next_column) + (!depth * column_vector_size);
-                    ++num_columns;
-
-                    add_scores_to_column(column_pair, std::move(next_column), cur);
-
-                } else {
-                    pop(cur);
-
-                    if (!depth)
-                        table_.erase(next);
-                }
-            }
         }
     }
 
-    std::sort(starts.begin(), starts.end(), RefGreater());
-    assert(starts.empty() || std::get<0>(starts[0]) == std::get<0>(best_start));
+    // std::cerr << "ext\n";
 
-    init_backtrack();
-    tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
+    using Ref = std::pair<score_t, size_t>;
+    Ref best_score { 0, 0 };
 
-    std::vector<DBGAlignment> extensions;
-    for (const auto &[max_score, max_pos_cached, best_node, max_reach] : starts) {
-        if (skip_backtrack_start(extensions, best_node) || prev_starts.count(best_node))
-            continue;
+    std::priority_queue<Ref> queue;
+    queue.emplace(0, 0);
 
-        assert(table_.count(std::get<0>(best_node)));
-        const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-            = table_[std::get<0>(best_node)].first.at(std::get<2>(best_node));
+    size_t num_termina = 0;
 
-        assert(S[max_pos - offset] == max_score);
+    while (queue.size() && num_termina < 4) {
+        size_t i = queue.top().second;
+        queue.pop();
 
-        if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
-                && !std::get<2>(best_node)) {
-            if (seed_->get_score() >= min_path_score) {
-                DEBUG_LOG("Alignment (seed): {}", *seed_);
-                extensions.emplace_back(*seed_);
-                extensions.back().extend_query_end(query_.data() + query_.size());
-                extensions.back().trim_offset();
-                assert(extensions.back().is_valid(graph_, &config_));
+        std::vector<std::pair<NodeType, char>> outgoing;
+        size_t next_offset = -1;
+
+        size_t begin = 0;
+        size_t end = window.size() + 1;
+
+        {
+            const auto &[S, E, F, OS, OE, OF, PS, PF, node, c, offset, max_pos] = table[i];
+            next_offset = offset + 1;
+
+            if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char) {
+                ++num_termina;
+                continue;
             }
+
+            begin = std::find_if(S.begin(), S.end(),
+                                 [&](score_t s) { return s >= xdrop_cutoff; }) - S.begin();
+            end = std::find_if(S.begin() + begin, S.end(),
+                               [&](score_t s) { return s < xdrop_cutoff; }) - S.begin();
+
+            if (end != S.size())
+                ++end;
+
+            if (end == begin) {
+                ++num_termina;
+                continue;
+            }
+
+            // std::cerr << "check\t" << next_offset << "\t" << (end - begin) << "\t" << S[max_pos] <<  " " << xdrop_cutoff << "\n";
+
+            if (config_.num_alternative_paths == 1) {
+                bool has_extension = false;
+                for (size_t j = begin; j < end; ++j) {
+                    assert(partial[j] == config_.match_score(window.substr(j)));
+                    if (S[j] + partial[j] >= best_score.first) {
+                        has_extension = true;
+                        break;
+                    }
+                }
+
+                if (!has_extension) {
+                    ++num_termina;
+                    continue;
+                }
+            }
+
+            if (next_offset - seed_->get_offset() < seed_->get_sequence().size()) {
+                if (next_offset < graph_.get_k()) {
+                    outgoing.emplace_back(seed_->front(), seed_->get_sequence()[next_offset - seed_->get_offset()]);
+                } else {
+                    outgoing.emplace_back((*seed_)[next_offset - graph_.get_k() + 1],
+                                          seed_->get_sequence()[next_offset - seed_->get_offset()]);
+                    assert(graph_.traverse(node, outgoing.back().second) == outgoing.back().first);
+                }
+            } else {
+                assert(node != graph_.max_index() + 1);
+                graph_.call_outgoing_kmers(node, [&](NodeType next, char c) {
+                    outgoing.emplace_back(next, c);
+                });
+            }
+
+            // std::cerr << "foo\t" << best_score.first << "\t" << xdrop_cutoff << "\t" << S[max_pos] << "\t" << queue.size() << "\t"
+            //           << node << " " << outgoing.size() << " " << next_offset << " "
+            //           << max_pos << "/" << window.size() << "\n";
+        }
+
+        for (const auto &[next, c] : outgoing) {
+            table.emplace_back(std::vector<score_t>(window.size() + 1, ninf),
+                               std::vector<score_t>(window.size() + 1, ninf),
+                               std::vector<score_t>(window.size() + 1, ninf),
+                               std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                               std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                               std::vector<Cigar::Operator>(window.size() + 1, Cigar::CLIPPED),
+                               std::vector<size_t>(window.size() + 1, -1),
+                               std::vector<size_t>(window.size() + 1, -1),
+                               next, c, next_offset, 0);
+
+            const auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
+                         PS_prev, PF_prev, node_prev, c_prev, offset_prev, max_pos_prev] = table[i];
+
+            auto &[S, E, F, OS, OE, OF, PS, PF, node_cur, c_stored, offset, max_pos] = table.back();
+            assert(node_cur == next);
+            assert(c_stored == c);
+            assert(offset == offset_prev + 1);
+            assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
+
+            const int8_t *profile_scores = profile_score_[c].data() + start;
+            const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
+
+            auto update_del = [&](size_t j) {
+                score_t del_open = S_prev[j] + config_.gap_opening_penalty;
+                score_t del_extend = F_prev[j] + config_.gap_extension_penalty;
+                F[j] = std::max({ ninf, del_open, del_extend });
+                if (F[j] > ninf) {
+                    OF[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                    PF[j] = i;
+                    if (F[j] > S[j]) {
+                        S[j] = F[j];
+                        OS[j] = Cigar::DELETION;
+                        PS[j] = i;
+                        if (S[j] > S[max_pos])
+                            max_pos = j;
+                    }
+                }
+            };
+
+            if (begin == 0)
+                update_del(0);
+
+            // update scores
+            for (size_t j = std::max(begin, (size_t)1); j < end; ++j) {
+                // deletion
+                update_del(j);
+
+                score_t match = std::max(ninf, S_prev[j - 1] + profile_scores[j]);
+                if (match > S[j]) {
+                    S[j] = match;
+                    OS[j] = profile_ops[j];
+                    assert(OS[j] == Cigar::MATCH || OS[j] == Cigar::MISMATCH);
+                    PS[j] = i;
+                    if (S[j] > S[max_pos])
+                        max_pos = j;
+                }
+
+                score_t ins_open = S[j - 1] + config_.gap_opening_penalty;
+                score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
+                E[j] = std::max({ ninf, ins_open, ins_extend });
+
+                if (E[j] != ninf) {
+                    OE[j] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
+
+                    if (E[j] > S[j]) {
+                        S[j] = E[j];
+                        OS[j] = Cigar::INSERTION;
+                        PS[j] = table.size() - 1;
+                        if (S[j] > S[max_pos])
+                            max_pos = j;
+                    }
+                }
+            }
+
+            if (S[max_pos] - xdrop > xdrop_cutoff) {
+                xdrop_cutoff = S[max_pos] - xdrop;
+                num_termina = 0;
+            }
+
+            for (size_t j = begin; j < end; ++j) {
+                if (S[j] < xdrop_cutoff) {
+                    S[j] = ninf;
+                    E[j] = ninf;
+                    F[j] = ninf;
+                    OS[j] = Cigar::CLIPPED;
+                    OE[j] = Cigar::CLIPPED;
+                    OF[j] = Cigar::CLIPPED;
+                    PS[j] = -1;
+                    PF[j] = -1;
+                }
+            }
+
+            bool kept = true;
+            if (S[max_pos] >= xdrop_cutoff) {
+                queue.emplace(S[max_pos], table.size() - 1);
+            } else {
+                table.pop_back();
+                kept = false;
+                ++num_termina;
+            }
+
+            if (kept && S[max_pos] > best_score.first)
+                best_score = { S[max_pos], table.size() - 1 };
+        }
+    }
+
+    if (table.size()) {
+        std::vector<size_t> indices;
+        if (config_.num_alternative_paths == 1) {
+            indices.push_back(best_score.second);
         } else {
-            assert(OS[max_pos - offset] == Cigar::MATCH);
-            backtrack(min_path_score, best_node, prev_starts, extensions);
+            indices.resize(table.size());
+            std::iota(indices.begin(), indices.end(), 0);
+            std::sort(indices.begin(), indices.end(), [&table](size_t i, size_t j) {
+                const auto &a = table[i];
+                const auto &b = table[j];
+                return std::get<0>(a)[std::get<11>(a)] > std::get<0>(b)[std::get<11>(b)];
+            });
+        }
+
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (extensions.size() >= config_.num_alternative_paths)
+                break;
+
+            std::vector<NodeType> path;
+            Cigar ops;
+            std::string seq;
+
+            size_t pos = 0;
+            size_t end_pos = 0;
+            score_t score = 0;
+
+            size_t j = indices[i];
+            {
+                const auto &[S, E, F, OS, OE, OF, PS, PF, node, c, offset, max_pos] = table[j];
+                if (S[max_pos] < min_path_score)
+                    break;
+
+                if (offset < graph_.get_k() - 1)
+                    continue;
+
+                if (OS[max_pos] != Cigar::MATCH && OS[max_pos] != Cigar::MISMATCH)
+                    continue;
+
+                pos = max_pos;
+                end_pos = max_pos;
+                score = S[pos];
+            }
+
+            while (pos || j) {
+                assert(j != static_cast<size_t>(-1));
+                const auto &[S, E, F, OS, OE, OF, PS, PF, node, c, offset, max_pos] = table[j];
+                assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
+
+                // std::cerr << j << "," << node << "," << graph_.get_node_sequence(node) << "," << offset << "\n";
+                // std::cerr << j << "," << pos << "\t";
+                // for (size_t k = 0; k < S.size(); ++k) {
+                //     std::cerr << (S[k] == ninf ? -10 : S[k]) << "\t";
+                // }
+                // std::cerr << "\n";
+
+                Cigar::Operator last_op = OS[pos];
+                switch (last_op) {
+                    case Cigar::MATCH:
+                    case Cigar::MISMATCH: {
+                        if (offset >= graph_.get_k() - 1)
+                            path.emplace_back(node);
+
+                        ops.append(last_op);
+                        seq += c;
+                        assert(PS[pos] != static_cast<size_t>(-1));
+                        j = PS[pos--];
+                    } break;
+                    case Cigar::INSERTION: {
+                        while (last_op == Cigar::INSERTION) {
+                            ops.append(last_op);
+                            last_op = OE[pos--];
+                        }
+                        assert(last_op == Cigar::MATCH);
+                    } break;
+                    case Cigar::DELETION: {
+                        while (last_op == Cigar::DELETION && (pos || j)) {
+                            const auto &[S, E, F, OS, OE, OF, PS, PF, node, c, offset, max_pos] = table[j];
+
+                            // std::cerr << j << "," << pos << "\t";
+                            // for (size_t k = 0; k < S.size(); ++k) {
+                            //     std::cerr << (S[k] == ninf ? -10 : S[k]) << "\t";
+                            // }
+                            // std::cerr << "\n";
+
+                            assert(PF[pos] != static_cast<size_t>(-1));
+                            last_op = OF[pos];
+                            if (offset >= graph_.get_k() - 1)
+                                path.emplace_back(node);
+
+                            seq += c;
+                            ops.append(Cigar::DELETION);
+                            j = PF[pos];
+                        }
+                        assert(last_op == Cigar::MATCH || (!pos && !j));
+                    } break;
+                    case Cigar::CLIPPED: { assert(false); } break;
+                }
+            }
+
+            assert(path.size());
+
+            std::reverse(ops.begin(), ops.end());
+            std::reverse(path.begin(), path.end());
+            std::reverse(seq.begin(), seq.end());
+
+            Alignment<NodeType> extension(
+                window.substr(0, end_pos),
+                std::move(path), std::move(seq), score, std::move(ops),
+                0, seed_->get_orientation(), seed_->get_offset()
+            );
+            assert(extension.is_valid(graph_, &config_));
+
+            std::ignore = config_;
+            extension.trim_offset();
+            extension.extend_query_begin(query_.data());
+            extension.extend_query_end(query_.data() + query_.size());
+            assert(extension.is_valid(graph_, &config_));
+
+            extensions.emplace_back(std::move(extension));
         }
     }
 
     return extensions;
+
+
+    // const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
+    // start_ = align_start - query_.data();
+    // size_t size = query_.size() - start_ + 1;
+    // assert(start_ + size == partial_sums_.size());
+
+    // extend_window_ = std::string_view{ align_start, size - 1 };
+    // DEBUG_LOG("Extend query window: {}", extend_window_);
+    // assert(extend_window_[0] == seed_->get_query().back());
+
+    // auto &first_column = table_.emplace(
+    //     graph_.max_index() + 1,
+    //     Column{ { std::make_tuple(
+    //         ScoreVec(1, ninf), ScoreVec(1, ninf), ScoreVec(1, ninf),
+    //         OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED),
+    //         AlignNode{}, PrevVec(1, NONE), PrevVec(1, NONE),
+    //         0 /* offset */, 0 /* max_pos */
+    //     ) }, false }
+    // ).first.value().first[0];
+    // sanitize(first_column, ninf);
+    // auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = first_column;
+
+    // size_t num_columns = 1;
+    // constexpr size_t column_vector_size = sizeof(std::pair<NodeType, std::pair<Column, bool>>);
+
+    // auto get_column_size = [&](const Scores &scores) {
+    //     size_t size = std::get<0>(scores).capacity();
+    //     return sizeof(Scores) + size * (
+    //         sizeof(score_t) * 3 + sizeof(Cigar::Operator) * 3 + sizeof(NodeId) * 2
+    //     );
+    // };
+    // size_t total_size = column_vector_size + get_column_size(first_column);
+
+    // S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start_ + 1];
+
+    // typedef std::tuple<score_t, size_t, AlignNode, size_t> Ref;
+    // Ref best_start{ S[0], max_pos, start_node_, offset + S.size() };
+    // std::vector<Ref> starts;
+
+    // struct RefLess {
+    //     bool operator()(const Ref &a, const Ref &b) const {
+    //         return std::make_pair(std::get<0>(a), -std::get<3>(a))
+    //             < std::make_pair(std::get<0>(b), -std::get<3>(b));
+    //     }
+    // };
+
+    // struct RefGreater {
+    //     bool operator()(const Ref &a, const Ref &b) const {
+    //         return std::make_pair(std::get<0>(a), std::get<1>(a))
+    //             > std::make_pair(std::get<0>(b), std::get<1>(b));
+    //     }
+    // };
+
+    // std::priority_queue<Ref, std::vector<Ref>, RefLess> stack;
+    // stack.emplace(S[0], max_pos, start_node_, offset + S.size());
+
+    // while (stack.size()) {
+    //     AlignNode prev = std::get<2>(stack.top());
+    //     score_t last_score = std::get<0>(stack.top());
+
+    //     stack.pop();
+
+    //     if (last_score < xdrop_cutoff_)
+    //         continue;
+
+    //     bool continue_traversal = true;
+    //     while (continue_traversal) {
+    //         continue_traversal = false;
+
+    //         if (static_cast<double>(total_size) / 1000000
+    //                 > config_.max_ram_per_alignment) {
+    //             DEBUG_LOG("Alignment RAM limit reached, stopping extension");
+    //             stack = decltype(stack)();
+    //             break;
+    //         }
+
+    //         if (static_cast<double>(std::get<3>(prev)) / extend_window_.size()
+    //                 > config_.max_nodes_per_seq_char) {
+    //             DEBUG_LOG("Alignment reached too far, skipping");
+    //             break;
+    //         }
+
+    //         bool prev_converged = table_[std::get<0>(prev)].second;
+
+    //         auto outgoing = get_outgoing(prev);
+
+    //         for (const auto &cur : outgoing) {
+    //             const auto &[next, c, depth, next_distance_from_origin] = cur;
+    //             auto &column_pair = table_[next];
+    //             auto &[column, converged] = column_pair;
+    //             assert(depth == column.size());
+    //             assert(next_distance_from_origin == std::get<3>(prev) + 1);
+
+    //             if (prev_converged && converged) {
+    //                 pop(cur);
+    //                 continue;
+    //             }
+
+    //             assert(table_.count(std::get<0>(prev)));
+    //             auto &column_prev = table_[std::get<0>(prev)];
+
+    //             xdrop_cutoff_ = std::get<0>(best_start) - config_.xdrop;
+
+    //             // compute bandwidth based on xdrop criterion
+    //             auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff_);
+    //             if (min_i >= max_i) {
+    //                 pop(cur);
+    //                 continue;
+    //             }
+
+    //             max_i = std::min(max_i + 1, size);
+
+    //             size_t cur_size = max_i - min_i;
+
+    //             Scores next_column(ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
+    //                                ScoreVec(cur_size, ninf), OpVec(cur_size, Cigar::CLIPPED),
+    //                                OpVec(cur_size, Cigar::CLIPPED),
+    //                                OpVec(cur_size, Cigar::CLIPPED),
+    //                                prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
+    //                                min_i /* offset */, 0 /* max_pos */);
+    //             sanitize(next_column, std::get<0>(best_start));
+
+    //             bool updated = update_column<NodeType>(
+    //                 graph_, config_, column_prev, next_column, c, start_, size,
+    //                 xdrop_cutoff_, profile_score_, profile_op_, *seed_
+    //             );
+
+    //             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
+
+    //             auto max_it = S.begin() + (max_pos - offset);
+
+    //             converged = !updated || has_converged(column_pair, next_column);
+
+    //             const score_t *match = &partial_sums_[start_ + offset];
+    //             bool extendable = false;
+    //             for (size_t i = 0; i < S.size() && !extendable; ++i) {
+    //                 if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
+    //                     extendable = true;
+    //             }
+
+    //             bool add_to_table = false;
+    //             if (OS[max_pos - offset] == Cigar::MATCH && *max_it > std::get<0>(best_start)) {
+    //                 std::get<3>(best_start) = offset + S.size();
+    //                 std::get<2>(best_start) = cur;
+    //                 std::get<1>(best_start) = max_pos;
+    //                 std::get<0>(best_start) = *max_it;
+    //                 add_to_table = true;
+    //             }
+
+    //             assert(xdrop_cutoff_ == std::get<0>(best_start) - config_.xdrop);
+
+    //             if (*max_it >= xdrop_cutoff_ && extendable) {
+    //                 if (outgoing.size() == 1) {
+    //                     prev = cur;
+    //                     continue_traversal = true;
+    //                 } else {
+    //                     stack.emplace(*max_it, max_pos, cur, offset + S.size());
+    //                 }
+    //                 add_to_table = true;
+    //             }
+
+    //             if (add_to_table) {
+    //                 if (OS[max_pos - offset] == Cigar::MATCH)
+    //                     starts.emplace_back(*max_it, max_pos, cur, offset + S.size());
+
+    //                 sanitize(next_column, std::get<0>(best_start));
+
+    //                 total_size += get_column_size(next_column) + (!depth * column_vector_size);
+    //                 ++num_columns;
+
+    //                 add_scores_to_column(column_pair, std::move(next_column), cur);
+
+    //             } else {
+    //                 pop(cur);
+
+    //                 if (!depth)
+    //                     table_.erase(next);
+    //             }
+    //         }
+    //     }
+    // }
+
+    // std::sort(starts.begin(), starts.end(), RefGreater());
+    // assert(starts.empty() || std::get<0>(starts[0]) == std::get<0>(best_start));
+
+    // init_backtrack();
+    // tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
+
+    // std::vector<DBGAlignment> extensions;
+    // for (const auto &[max_score, max_pos_cached, best_node, max_reach] : starts) {
+    //     if (skip_backtrack_start(extensions, best_node) || prev_starts.count(best_node))
+    //         continue;
+
+    //     assert(table_.count(std::get<0>(best_node)));
+    //     const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+    //         = table_[std::get<0>(best_node)].first.at(std::get<2>(best_node));
+
+    //     assert(S[max_pos - offset] == max_score);
+
+    //     if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
+    //             && !std::get<2>(best_node)) {
+    //         if (seed_->get_score() >= min_path_score) {
+    //             DEBUG_LOG("Alignment (seed): {}", *seed_);
+    //             extensions.emplace_back(*seed_);
+    //             extensions.back().extend_query_end(query_.data() + query_.size());
+    //             extensions.back().trim_offset();
+    //             assert(extensions.back().is_valid(graph_, &config_));
+    //         }
+    //     } else {
+    //         assert(OS[max_pos - offset] == Cigar::MATCH);
+    //         backtrack(min_path_score, best_node, prev_starts, extensions);
+    //     }
+    // }
+
+    // return extensions;
 }
 
 template <typename NodeType>
@@ -715,6 +1072,7 @@ auto DefaultColumnExtender<NodeType>
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const {
+    return;
     const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
     size_t window_start = align_start - query_.data();
 
