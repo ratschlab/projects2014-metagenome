@@ -95,8 +95,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                        OpVec(window.size() + 1, Cigar::CLIPPED),
                        graph_.max_index() + 1, -1, '\0', seed_->get_offset() - 1, 0);
 
-    score_t xdrop = config_.xdrop;
-    score_t xdrop_cutoff = -xdrop;
+    score_t xdrop_cutoff = -config_.xdrop;
+    assert(config_.xdrop > 0);
+    assert(xdrop_cutoff < 0);
 
     {
         auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[0];
@@ -126,7 +127,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     queue.emplace(best_score);
 
     size_t num_termina = 0;
-    constexpr size_t max_num_termina = 4;
+    constexpr size_t max_num_termina = 10;
+
+
 
     while (queue.size() && num_termina < max_num_termina) {
         size_t i = queue.top().second;
@@ -197,7 +200,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         }
 
         for (const auto &[next, c] : outgoing) {
-            assert(xdrop_cutoff == best_score.first - xdrop);
+            assert(best_score.first > xdrop_cutoff);
 
             table.emplace_back(ScoreVec(window.size() + 1, ninf),
                                ScoreVec(window.size() + 1, ninf),
@@ -229,8 +232,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 if (del_score >= xdrop_cutoff) {
                     F[j] = del_score;
                     OF[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-                    if (F[j] > s_score) {
-                        s_score = F[j];
+                    if (del_score > s_score) {
+                        s_score = del_score;
                         s_op = Cigar::DELETION;
                     }
                 }
@@ -243,7 +246,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
             size_t loop_begin = std::max(begin, (size_t)1);
 
-            // update scores
+            // update match and delete scores
             #pragma omp simd
             for (size_t j = loop_begin; j < end; ++j) {
                 score_t s_score = ninf;
@@ -262,6 +265,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 OS[j] = s_op;
             }
 
+            // update insertion scores
+            // since each element is dependent on the previous one, this can't
+            // be vectorized easily
+            #pragma omp simd
             for (size_t j = loop_begin; j < end; ++j) {
                 score_t ins_open = S[j - 1] + config_.gap_opening_penalty;
                 score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
@@ -271,8 +278,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     E[j] = ins_score;
                     OE[j] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-                    if (E[j] > S[j]) {
-                        S[j] = E[j];
+                    if (ins_score > S[j]) {
+                        S[j] = ins_score;
                         OS[j] = Cigar::INSERTION;
                     }
                 }
@@ -284,10 +291,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 Ref next_score { S[max_pos], table.size() - 1 };
                 queue.emplace(next_score);
 
-                if (S[max_pos] - xdrop_cutoff > xdrop) {
-                    xdrop_cutoff = S[max_pos] - xdrop;
+                if (S[max_pos] - xdrop_cutoff > config_.xdrop)
+                    xdrop_cutoff = S[max_pos] - config_.xdrop;
+
+                if (S[max_pos] > best_score.first) {
                     num_termina = 0;
-                    assert(S[max_pos] > best_score.first);
                     best_score = next_score;
                 }
 
