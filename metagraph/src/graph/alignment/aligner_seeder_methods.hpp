@@ -1,6 +1,8 @@
 #ifndef __ALIGNER_SEEDER_METHODS_HPP__
 #define __ALIGNER_SEEDER_METHODS_HPP__
 
+#include <tsl/hopscotch_map.h>
+
 #include "aligner_alignment.hpp"
 #include "common/vectors/bitmap.hpp"
 
@@ -129,6 +131,22 @@ class SuffixSeeder : public BaseSeeder {
   private:
     const DBGSuccinct &dbg_succ_;
 
+};
+
+class SeedFilter {
+  public:
+    typedef uint64_t node_index;
+    typedef Alignment<node_index> DBGAlignment;
+    typedef std::function<void(node_index, uint64_t, size_t, size_t)> LabeledNodeRangeCallback;
+    typedef std::function<void(const LabeledNodeRangeCallback&)> LabeledNodeRangeGenerator;
+
+    SeedFilter(size_t k) : k_(k) {}
+    Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
+    void update_seed_filter(const LabeledNodeRangeGenerator &generator);
+
+  private:
+    size_t k_;
+    tsl::hopscotch_map<node_index, std::pair<size_t, size_t>> visited_nodes_;
 };
 
 } // namespace align

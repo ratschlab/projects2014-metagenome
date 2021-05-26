@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "aligner_alignment.hpp"
+#include "aligner_seeder_methods.hpp"
 #include "common/aligned_vector.hpp"
 
 
@@ -92,6 +93,15 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                        size_t /* max_pos */> Scores;
     typedef std::pair<std::vector<Scores>, bool> Column;
 
+    typedef std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, OpVec, OpVec, OpVec,
+                                   NodeType, size_t, char, size_t, size_t>> Table;
+
+    Table table;
+
+    SeedFilter seed_filter_;
+
+
+
     struct AlignNodeHash {
         uint64_t operator()(const AlignNode &x) const {
             uint64_t seed = hasher1(std::get<0>(x));
@@ -105,7 +115,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     tsl::hopscotch_map<NodeType, Column> table_;
 
     // the initial seed
-    const DBGAlignment *seed_;
+    const DBGAlignment *seed_ = nullptr;
 
     score_t xdrop_cutoff_;
     size_t start_;

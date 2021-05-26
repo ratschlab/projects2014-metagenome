@@ -411,6 +411,48 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
 }
 
 
+Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
+    size_t found_count = 0;
+    std::pair<size_t, size_t> idx_range {
+        seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
+    };
+    for (node_index node : seed) {
+        auto emplace = visited_nodes_.emplace(node, idx_range);
+        auto &range = emplace.first.value();
+        if (emplace.second) {
+        } else if (range.first > idx_range.first || range.second < idx_range.second) {
+            DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
+            range.first = std::min(range.first, idx_range.first);
+            range.second = std::max(range.second, idx_range.second);
+            DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
+        } else {
+            ++found_count;
+        }
+
+        if (idx_range.second - idx_range.first == k_)
+            ++idx_range.first;
+
+        ++idx_range.second;
+    }
+
+    if (found_count == seed.size())
+        return {};
+
+    return { std::numeric_limits<uint64_t>::max() };
+}
+
+void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
+    generator([&](node_index node, uint64_t, size_t begin, size_t end) {
+        auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+        auto &range = emplace.first.value();
+        if (!emplace.second) {
+            range.first = std::min(range.first, begin);
+            range.second = std::max(range.second, end);
+        }
+    });
+}
+
+
 template class ExactSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;

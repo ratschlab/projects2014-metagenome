@@ -1,29 +1,10 @@
 #include "dbg_aligner.hpp"
 
-#include <tsl/hopscotch_map.h>
-
 #include "common/algorithms.hpp"
 
 namespace mtg {
 namespace graph {
 namespace align {
-
-
-class SeedFilter {
-  public:
-    typedef IDBGAligner::DBGAlignment DBGAlignment;
-    typedef IDBGAligner::node_index node_index;
-    typedef std::function<void(node_index, uint64_t, size_t, size_t)> LabeledNodeRangeCallback;
-    typedef std::function<void(const LabeledNodeRangeCallback&)> LabeledNodeRangeGenerator;
-
-    SeedFilter(size_t k) : k_(k) {}
-    Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
-    void update_seed_filter(const LabeledNodeRangeGenerator &generator);
-
-  private:
-    size_t k_;
-    tsl::hopscotch_map<node_index, std::pair<size_t, size_t>> visited_nodes_;
-};
 
 
 template <class AlignmentCompare = LocalAlignmentLess>
@@ -207,47 +188,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
         aligner_core.flush();
 
         callback(header, std::move(paths));
-    });
-}
-
-inline Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
-    size_t found_count = 0;
-    std::pair<size_t, size_t> idx_range {
-        seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
-    };
-    for (node_index node : seed) {
-        auto emplace = visited_nodes_.emplace(node, idx_range);
-        auto &range = emplace.first.value();
-        if (emplace.second) {
-        } else if (range.first > idx_range.first || range.second < idx_range.second) {
-            DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
-            range.first = std::min(range.first, idx_range.first);
-            range.second = std::max(range.second, idx_range.second);
-            DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-        } else {
-            ++found_count;
-        }
-
-        if (idx_range.second - idx_range.first == k_)
-            ++idx_range.first;
-
-        ++idx_range.second;
-    }
-
-    if (found_count == seed.size())
-        return {};
-
-    return { std::numeric_limits<uint64_t>::max() };
-}
-
-inline void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
-    generator([&](node_index node, uint64_t, size_t begin, size_t end) {
-        auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-        auto &range = emplace.first.value();
-        if (!emplace.second) {
-            range.first = std::min(range.first, begin);
-            range.second = std::max(range.second, end);
-        }
     });
 }
 
