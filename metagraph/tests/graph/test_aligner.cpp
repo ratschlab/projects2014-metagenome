@@ -951,13 +951,15 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(6, path.size());
-    EXPECT_EQ(reference.substr(10), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.substr(4)), path.get_score());
-    EXPECT_EQ("4S9=", path.get_cigar().to_string());
-    EXPECT_EQ(9u, path.get_num_matches());
+    EXPECT_EQ(16, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
+                + 5 * config.gap_extension_penalty,
+              path.get_score());
+    EXPECT_EQ("4=6D9=", path.get_cigar().to_string());
+    EXPECT_EQ(13u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
-    EXPECT_EQ(4u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));

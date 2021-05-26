@@ -198,98 +198,16 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
              IExtender<node_index> &extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) {
-    bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
-    constexpr uint64_t nlabel = std::numeric_limits<uint64_t>::max();
-
-    std::vector<DBGAlignment> seeds = seeder.get_seeds();
-
-    if (filter_seeds
-            && std::any_of(seeds.begin(), seeds.end(),
-                           [&](const auto &a) { return a.target_columns.size(); })) {
-        constexpr auto get_end_ptr = [](const DBGAlignment &a) {
-            return a.get_query().data() + a.get_query().size();
-        };
-
-        std::sort(seeds.begin(), seeds.end(), [&](const auto &a, const auto &b) {
-            return get_end_ptr(a) < get_end_ptr(b);
-        });
-
-        for (size_t i = 0; i + 1 < seeds.size(); ++i) {
-            DBGAlignment &seed = seeds[i];
-            if (get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) == 1
-                    && seed.target_columns.size()
-                    && seeds[i + 1].target_columns.size()) {
-                uint64_t cnt = utils::count_intersection(
-                    seed.target_columns.begin(), seed.target_columns.end(),
-                    seeds[i + 1].target_columns.begin(), seeds[i + 1].target_columns.end()
-                );
-
-                if (!cnt || (cnt == seed.target_columns.size()
-                                && graph_.get_mode() == DeBruijnGraph::CANONICAL)) {
-                    if (seed.get_score() >= get_min_path_score(seed)) {
-                        seed.extend_query_end(query.data() + query.size());
-                        seed.trim_offset();
-                        assert(seed.is_valid(graph_, &config_));
-                        DEBUG_LOG("Alignment (seed): {}", seed);
-                        callback(std::move(seed));
-                    }
-
-                    DEBUG_LOG("Skipping seed: {}", seed);
-                    seed = DBGAlignment();
-                }
-            }
-        }
-    }
-
-    std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
-
-    for (size_t i = 0; i < seeds.size(); ++i) {
-        DBGAlignment &seed = seeds[i];
+    for (DBGAlignment &seed : seeder.get_seeds()) {
         if (seed.empty())
             continue;
 
         score_t min_path_score = get_min_path_score(seed);
 
-        // check if this seed has been explored before in an alignment and discard
-        // it if so
-        if (filter_seeds) {
-            seed.target_columns = seed_filter_->labels_to_keep(seed);
-            if (seed.target_columns.empty()) {
-                DEBUG_LOG("Skipping seed: {}", seed);
-                continue;
-            }
-
-            if (seed.target_columns.size() == 1 && seed.target_columns[0] == nlabel)
-                seed.target_columns.clear();
-        }
-
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
         extender.initialize(seed);
-
         auto extensions = extender.get_extensions(min_path_score);
-
-        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
-        // table to allow for seed filtration
-        if (filter_seeds) {
-            tsl::hopscotch_set<uint64_t> targets(seed.target_columns.begin(),
-                                                 seed.target_columns.end());
-            targets.insert(nlabel);
-            if (seed.target_columns.empty()) {
-                for (const DBGAlignment &extension : extensions) {
-                    targets.insert(extension.target_columns.begin(),
-                                   extension.target_columns.end());
-                }
-            }
-
-            seed_filter_->update_seed_filter([&](const auto &callback) {
-                extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-                    for (uint64_t target : targets) {
-                        callback(node, target, begin, end);
-                    }
-                });
-            });
-        }
 
         if (extensions.empty() && seed.get_score() >= min_path_score) {
             seed.extend_query_end(query.data() + query.size());
@@ -301,9 +219,12 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
         for (auto&& extension : extensions) {
             assert(extension.is_valid(graph_, &config_));
+            DEBUG_LOG("Alignment (extension): {}", seed);
             callback(std::move(extension));
         }
     }
+
+    // std::cerr << "end\n";
 }
 
 template <class AlignmentCompare>

@@ -64,6 +64,7 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
         xdrop_cutoff_ = ninf;
         table.clear();
     } else {
+        // std::cerr << "skipping\t" << seed << "\n";
         DEBUG_LOG("Skipping seed: {}", seed);
         seed_ = nullptr;
     }
@@ -79,6 +80,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
+
+    // std::cerr << "starting\t" << *seed_ << "\t" << window << "\n";
 
     size_t start = seed_->get_query().data() - query_.data();
     const score_t *partial = partial_sums_.data() + start;
@@ -206,6 +209,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                          node_prev, i_prev, c_prev, offset_prev, max_pos_prev] = table[i];
 
             auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos] = table.back();
+
+            // std::cerr << "\tcheck\t" << best_score.first << "\t" << table.size() << "," << offset << " "
+            //           << max_pos_prev << "/" << window.size() << "\n";
+
             assert(i_cur == i);
             assert(node_cur == next);
             assert(c_stored == c);
@@ -400,6 +407,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(extension.is_valid(graph_, &config_));
 
             extensions.emplace_back(std::move(extension));
+            // std::cerr << "ext\t" << extensions.back() << "\n";
         }
     }
 
