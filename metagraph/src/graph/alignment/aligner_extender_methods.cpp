@@ -81,7 +81,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
 
-    // std::cerr << "starting\t" << *seed_ << "\t" << window << "\n";
+    // std::cerr << "starting\t" << *seed_ << "\t" << window.size() << "\n";
 
     size_t start = seed_->get_query().data() - query_.data();
     const score_t *partial = partial_sums_.data() + start;
@@ -123,7 +123,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     Ref best_score { 0, 0 };
 
     std::priority_queue<Ref> queue;
-    queue.emplace(0, 0);
+    queue.emplace(best_score);
 
     size_t num_termina = 0;
     constexpr size_t max_num_termina = 4;
@@ -142,7 +142,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[i];
             next_offset = offset + 1;
 
-            if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char) {
+            if (static_cast<double>(next_offset) / window.size() >= 2) {
                 ++num_termina;
                 continue;
             }
@@ -219,63 +219,68 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(offset == offset_prev + 1);
             assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
 
-            const int8_t *profile_scores = profile_score_[c].data() + start;
-            const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
-
-            auto update_del = [&](size_t j) {
+            auto update_del = [&](size_t j, score_t &s_score, Cigar::Operator &s_op) {
                 score_t del_open = S_prev[j] + config_.gap_opening_penalty;
                 score_t del_extend = F_prev[j] + config_.gap_extension_penalty;
-                F[j] = std::max({ ninf, del_open, del_extend });
-                if (F[j] > ninf) {
+                score_t del_score = std::max(del_open, del_extend);
+
+                if (del_score > ninf) {
+                    F[j] = del_score;
                     OF[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-                    if (F[j] > S[j]) {
-                        S[j] = F[j];
-                        OS[j] = Cigar::DELETION;
-                        if (S[j] > S[max_pos])
-                            max_pos = j;
+                    if (F[j] > s_score) {
+                        s_score = F[j];
+                        s_op = Cigar::DELETION;
                     }
                 }
             };
 
             if (begin == 0)
-                update_del(0);
+                update_del(0, S[0], OS[0]);
+
+            const int8_t *profile_scores = profile_score_[c].data() + start;
+            const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
+            size_t loop_begin = std::max(begin, (size_t)1);
 
             // update scores
-            for (size_t j = std::max(begin, (size_t)1); j < end; ++j) {
-                // deletion
-                update_del(j);
+            #pragma omp simd
+            for (size_t j = loop_begin; j < end; ++j) {
+                score_t s_score = ninf;
+                Cigar::Operator s_op = Cigar::CLIPPED;
 
-                score_t match = std::max(ninf, S_prev[j - 1] + profile_scores[j]);
-                if (match > S[j]) {
-                    S[j] = match;
-                    OS[j] = profile_ops[j];
-                    assert(OS[j] == Cigar::MATCH || OS[j] == Cigar::MISMATCH);
-                    if (S[j] > S[max_pos])
-                        max_pos = j;
+                // deletion
+                update_del(j, s_score, s_op);
+
+                score_t match = S_prev[j - 1] + profile_scores[j];
+                if (match > s_score) {
+                    s_score = match;
+                    s_op = profile_ops[j];
                 }
 
+                S[j] = s_score;
+                OS[j] = s_op;
+            }
+
+            for (size_t j = loop_begin; j < end; ++j) {
                 score_t ins_open = S[j - 1] + config_.gap_opening_penalty;
                 score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
-                E[j] = std::max({ ninf, ins_open, ins_extend });
+                score_t ins_score = std::max(ins_open, ins_extend);
 
-                if (E[j] != ninf) {
+                if (ins_score > ninf) {
+                    E[j] = ins_score;
                     OE[j] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
                     if (E[j] > S[j]) {
                         S[j] = E[j];
                         OS[j] = Cigar::INSERTION;
-                        if (S[j] > S[max_pos])
-                            max_pos = j;
                     }
                 }
             }
 
-            if (S[max_pos] - xdrop > xdrop_cutoff) {
-                xdrop_cutoff = S[max_pos] - xdrop;
-                num_termina = 0;
-            }
-
+            #pragma omp simd
             for (size_t j = begin; j < end; ++j) {
+                if (S[j] > S[max_pos])
+                    max_pos = j;
+
                 if (S[j] < xdrop_cutoff) {
                     S[j] = ninf;
                     E[j] = ninf;
@@ -286,17 +291,20 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            bool kept = true;
             if (S[max_pos] >= xdrop_cutoff) {
-                queue.emplace(S[max_pos], table.size() - 1);
+                Ref next_score { S[max_pos], table.size() - 1 };
+                queue.emplace(next_score);
+
+                if (S[max_pos] - xdrop > xdrop_cutoff) {
+                    xdrop_cutoff = S[max_pos] - xdrop;
+                    num_termina = 0;
+                    best_score = next_score;
+                }
+
             } else {
                 table.pop_back();
-                kept = false;
                 ++num_termina;
             }
-
-            if (kept && S[max_pos] > best_score.first)
-                best_score = { S[max_pos], table.size() - 1 };
         }
     }
 
