@@ -223,8 +223,6 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             callback(std::move(extension));
         }
     }
-
-    // std::cerr << "end\n";
 }
 
 template <class AlignmentCompare>

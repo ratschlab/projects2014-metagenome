@@ -2,6 +2,7 @@
 
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/logger.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -64,7 +65,6 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
         xdrop_cutoff_ = ninf;
         table.clear();
     } else {
-        // std::cerr << "skipping\t" << seed << "\n";
         DEBUG_LOG("Skipping seed: {}", seed);
         seed_ = nullptr;
     }
@@ -87,7 +87,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     const score_t *partial = partial_sums_.data() + start;
     assert(*partial == config_.match_score(window));
 
-    table.emplace_back(ScoreVec(window.size() + 1, ninf),
+    table.emplace_back(ScoreVec(window.size() + 1, 0),
                        ScoreVec(window.size() + 1, ninf),
                        ScoreVec(window.size() + 1, ninf),
                        OpVec(window.size() + 1, Cigar::CLIPPED),
@@ -99,26 +99,27 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
-    {
-        auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[0];
-        S[0] = 0;
+    // {
+    //     auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[0];
+    //     S[0] = 0;
 
-        if (S.size() > 1) {
-            S[1] = config_.gap_opening_penalty;
-            E[1] = config_.gap_opening_penalty;
-            OE[1] = Cigar::MATCH;
-        }
+    //     if (S.size() > 1) {
+    //         S[1] = config_.gap_opening_penalty;
+    //         E[1] = config_.gap_opening_penalty;
+    //         OE[1] = Cigar::MATCH;
+    //         OS[1] = Cigar::INSERTION;
+    //     }
 
-        for (size_t j = 2; j < S.size(); ++j) {
-            S[j] = config_.gap_opening_penalty + (j - 1) * config_.gap_extension_penalty;
-            E[j] = S[j];
-            OS[j] = Cigar::INSERTION;
-            OE[j] = Cigar::INSERTION;
+    //     for (size_t j = 2; j < S.size(); ++j) {
+    //         S[j] = config_.gap_opening_penalty + (j - 1) * config_.gap_extension_penalty;
+    //         E[j] = S[j];
+    //         OS[j] = Cigar::INSERTION;
+    //         OE[j] = Cigar::INSERTION;
 
-            if (S[j] < xdrop_cutoff)
-                break;
-        }
-    }
+    //         if (S[j] < xdrop_cutoff)
+    //             break;
+    //     }
+    // }
 
     using Ref = std::pair<score_t, size_t>;
     Ref best_score { 0, 0 };
@@ -142,8 +143,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[i];
             next_offset = offset + 1;
 
-            if (static_cast<double>(next_offset) / window.size() >= 2)
-                continue;
+            // if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char)
+            //     continue;
 
             begin = std::find_if(S.begin(), S.end(),
                                  [&](score_t s) { return s >= xdrop_cutoff; }) - S.begin();
@@ -185,7 +186,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             } else {
                 assert(node != graph_.max_index() + 1);
                 graph_.call_outgoing_kmers(node, [&](NodeType next, char c) {
-                    outgoing.emplace_back(next, c);
+                    if (c != boss::BOSS::kSentinel)
+                        outgoing.emplace_back(next, c);
                 });
             }
         }
@@ -354,10 +356,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 score = S[pos];
             }
 
-            while (pos || j) {
+            while (j) {
                 assert(j != static_cast<size_t>(-1));
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
-                assert(!j || c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
+                assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
 
                 Cigar::Operator last_op = OS[pos];
                 switch (last_op) {
@@ -380,7 +382,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         assert(last_op == Cigar::MATCH);
                     } break;
                     case Cigar::DELETION: {
-                        while (last_op == Cigar::DELETION && (pos || j)) {
+                        while (last_op == Cigar::DELETION && j) {
                             const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
 
                             last_op = OF[pos];
@@ -392,11 +394,20 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             assert(j_prev != static_cast<size_t>(-1));
                             j = j_prev;
                         }
-                        assert(last_op == Cigar::MATCH || (!pos && !j));
+                        assert(last_op == Cigar::MATCH || !j);
                     } break;
-                    case Cigar::CLIPPED: { assert(false); } break;
+                    case Cigar::CLIPPED: {
+                        std::reverse(ops.begin(), ops.end());
+                        common::logger->error(
+                            "Invalid traceback:\nSeed: {}\tAlignment: {}\tTable index: {}\tPos: {}",
+                            *seed_, ops.to_string(), j, pos
+                        );
+                        throw std::runtime_error("Terminating");
+                    } break;
                 }
             }
+
+            ops.append(Cigar::CLIPPED, pos);
 
             assert(path.size());
 
@@ -405,13 +416,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             std::reverse(seq.begin(), seq.end());
 
             Alignment<NodeType> extension(
-                window.substr(0, end_pos),
+                window.substr(pos, end_pos - pos),
                 std::move(path), std::move(seq), score, std::move(ops),
                 0, seed_->get_orientation(), seed_->get_offset()
             );
             assert(extension.is_valid(graph_, &config_));
 
-            std::ignore = config_;
             extension.trim_offset();
             extension.extend_query_begin(query_.data());
             extension.extend_query_end(query_.data() + query_.size());

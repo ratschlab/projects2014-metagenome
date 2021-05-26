@@ -30,7 +30,7 @@ using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
 
-DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
+DBGAlignerConfig initialize_aligner_config(const Config &config) {
     assert(config.alignment_num_alternative_paths);
 
     DBGAlignerConfig aligner_config;
@@ -53,12 +53,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
-
-    if (!aligner_config.min_seed_length)
-        aligner_config.min_seed_length = k;
-
-    if (!aligner_config.max_seed_length)
-        aligner_config.max_seed_length = k;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -90,14 +84,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
 
 template <template <class ... Types> class Aligner, class Graph>
 std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &config) {
-    size_t k;
-    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
-        k = graph.get_graph().get_k();
-    } else {
-        k = graph.get_k();
-    }
-
-    return build_aligner<Aligner, Graph>(graph, initialize_aligner_config(k, config));
+    return build_aligner<Aligner, Graph>(graph, initialize_aligner_config(config));
 }
 
 template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const Config&);
@@ -488,7 +475,7 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
+    DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
 
     std::shared_ptr<AnnotatedDBG::Annotator> annotator;
     if (config->infbase_annotators.size()) {

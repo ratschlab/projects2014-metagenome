@@ -1313,7 +1313,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-        config.max_seed_length = k;
         DBGAligner<ExactSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -1347,7 +1346,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-        config.max_seed_length = k;
         DBGAligner<ExactSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -1394,7 +1392,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-        config.max_seed_length = k;
         config.min_seed_length = 13;
         DBGAligner<ExactSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
@@ -1441,7 +1438,6 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1510,7 +1506,6 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1555,7 +1550,7 @@ TEST(DBGAlignerTest, align_dummy) {
 
     auto graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_seed_length = k;
+    config.min_seed_length = 5;
     graph->add_sequence(reference);
 
     DBGAligner<ExactSeeder<>> aligner(*graph, config);
@@ -1585,7 +1580,6 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
     auto graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
-    config.max_seed_length = k;
     config.min_seed_length = 15;
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
@@ -1618,7 +1612,7 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.min_seed_length = 13;
 
-    for (size_t max_seed_length : { k, k + 100 }) {
+    for (size_t max_seed_length : { (size_t)0, k + 100 }) {
         config.max_seed_length = max_seed_length;
         DBGAligner<ExactSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);

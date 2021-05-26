@@ -71,6 +71,12 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {
+        if (!config_.min_seed_length)
+            config_.min_seed_length = graph_.get_k();
+
+        if (!config_.max_seed_length)
+            config_.max_seed_length = graph_.get_k();
+
         assert(config_.num_alternative_paths);
         if (!config_.check_config_scores())
             throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");

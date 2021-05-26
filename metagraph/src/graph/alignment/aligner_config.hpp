@@ -52,8 +52,8 @@ class DBGAlignerConfig {
     }
 
     size_t num_alternative_paths = 1;
-    size_t min_seed_length = 1;
-    size_t max_seed_length = std::numeric_limits<size_t>::max();
+    size_t min_seed_length = 0;
+    size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     size_t num_top_labels = std::numeric_limits<size_t>::max();
 
