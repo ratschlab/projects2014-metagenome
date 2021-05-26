@@ -197,6 +197,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         }
 
         for (const auto &[next, c] : outgoing) {
+            assert(xdrop_cutoff == best_score.first - xdrop);
+
             table.emplace_back(ScoreVec(window.size() + 1, ninf),
                                ScoreVec(window.size() + 1, ninf),
                                ScoreVec(window.size() + 1, ninf),
@@ -224,7 +226,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 score_t del_extend = F_prev[j] + config_.gap_extension_penalty;
                 score_t del_score = std::max(del_open, del_extend);
 
-                if (del_score > ninf) {
+                if (del_score >= xdrop_cutoff) {
                     F[j] = del_score;
                     OF[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
                     if (F[j] > s_score) {
@@ -251,7 +253,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 update_del(j, s_score, s_op);
 
                 score_t match = S_prev[j - 1] + profile_scores[j];
-                if (match > s_score) {
+                if (match > std::max(s_score, xdrop_cutoff - 1)) {
                     s_score = match;
                     s_op = profile_ops[j];
                 }
@@ -265,7 +267,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
                 score_t ins_score = std::max(ins_open, ins_extend);
 
-                if (ins_score > ninf) {
+                if (ins_score >= xdrop_cutoff) {
                     E[j] = ins_score;
                     OE[j] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
@@ -276,28 +278,16 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            #pragma omp simd
-            for (size_t j = begin; j < end; ++j) {
-                if (S[j] > S[max_pos])
-                    max_pos = j;
-
-                if (S[j] < xdrop_cutoff) {
-                    S[j] = ninf;
-                    E[j] = ninf;
-                    F[j] = ninf;
-                    OS[j] = Cigar::CLIPPED;
-                    OE[j] = Cigar::CLIPPED;
-                    OF[j] = Cigar::CLIPPED;
-                }
-            }
+            max_pos = std::max_element(S.begin() + begin, S.begin() + end) - S.begin();
 
             if (S[max_pos] >= xdrop_cutoff) {
                 Ref next_score { S[max_pos], table.size() - 1 };
                 queue.emplace(next_score);
 
-                if (S[max_pos] - xdrop > xdrop_cutoff) {
+                if (S[max_pos] - xdrop_cutoff > xdrop) {
                     xdrop_cutoff = S[max_pos] - xdrop;
                     num_termina = 0;
+                    assert(S[max_pos] > best_score.first);
                     best_score = next_score;
                 }
 
