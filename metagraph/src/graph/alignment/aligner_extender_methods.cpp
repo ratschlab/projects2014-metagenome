@@ -126,12 +126,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::priority_queue<Ref> queue;
     queue.emplace(best_score);
 
-    size_t num_termina = 0;
-    constexpr size_t max_num_termina = 10;
+    tsl::hopscotch_map<NodeType, ScoreVec> conv_checker;
 
-
-
-    while (queue.size() && num_termina < max_num_termina) {
+    while (queue.size()) {
         size_t i = queue.top().second;
         queue.pop();
 
@@ -145,10 +142,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[i];
             next_offset = offset + 1;
 
-            if (static_cast<double>(next_offset) / window.size() >= 2) {
-                ++num_termina;
+            if (static_cast<double>(next_offset) / window.size() >= 2)
                 continue;
-            }
 
             begin = std::find_if(S.begin(), S.end(),
                                  [&](score_t s) { return s >= xdrop_cutoff; }) - S.begin();
@@ -158,10 +153,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (end != S.size())
                 ++end;
 
-            if (end == begin) {
-                ++num_termina;
+            if (end == begin)
                 continue;
-            }
 
             seed_filter_.update_seed_filter([&](const auto &callback) {
                 callback(node, 0, begin, end);
@@ -177,10 +170,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     }
                 }
 
-                if (!has_extension) {
-                    ++num_termina;
+                if (!has_extension)
                     continue;
-                }
             }
 
             if (next_offset - seed_->get_offset() < seed_->get_sequence().size()) {
@@ -289,19 +280,33 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             if (S[max_pos] >= xdrop_cutoff) {
                 Ref next_score { S[max_pos], table.size() - 1 };
-                queue.emplace(next_score);
 
                 if (S[max_pos] - xdrop_cutoff > config_.xdrop)
                     xdrop_cutoff = S[max_pos] - config_.xdrop;
 
-                if (S[max_pos] > best_score.first) {
-                    num_termina = 0;
+                if (S[max_pos] > best_score.first)
                     best_score = next_score;
+
+                auto it = conv_checker.find(next);
+                if (it == conv_checker.end()) {
+                    conv_checker.emplace(next, std::get<0>(table.back()));
+                    queue.emplace(next_score);
+                } else {
+                    ScoreVec &s_merged = it.value();
+                    bool converged = true;
+                    for (size_t j = begin; j < end; ++j) {
+                        if (S[j] > s_merged[j]) {
+                            converged = false;
+                            s_merged[j] = S[j];
+                        }
+                    }
+
+                    if (!converged)
+                        queue.emplace(next_score);
                 }
 
             } else {
                 table.pop_back();
-                ++num_termina;
             }
         }
     }
@@ -352,7 +357,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             while (pos || j) {
                 assert(j != static_cast<size_t>(-1));
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
-                assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
+                assert(!j || c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
 
                 Cigar::Operator last_op = OS[pos];
                 switch (last_op) {
