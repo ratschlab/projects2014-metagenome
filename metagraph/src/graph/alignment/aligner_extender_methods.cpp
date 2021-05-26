@@ -99,28 +99,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
-    // {
-    //     auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[0];
-    //     S[0] = 0;
-
-    //     if (S.size() > 1) {
-    //         S[1] = config_.gap_opening_penalty;
-    //         E[1] = config_.gap_opening_penalty;
-    //         OE[1] = Cigar::MATCH;
-    //         OS[1] = Cigar::INSERTION;
-    //     }
-
-    //     for (size_t j = 2; j < S.size(); ++j) {
-    //         S[j] = config_.gap_opening_penalty + (j - 1) * config_.gap_extension_penalty;
-    //         E[j] = S[j];
-    //         OS[j] = Cigar::INSERTION;
-    //         OE[j] = Cigar::INSERTION;
-
-    //         if (S[j] < xdrop_cutoff)
-    //             break;
-    //     }
-    // }
-
     using Ref = std::pair<score_t, size_t>;
     Ref best_score { 0, 0 };
 
@@ -207,9 +185,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                          node_prev, i_prev, c_prev, offset_prev, max_pos_prev] = table[i];
 
             auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos] = table.back();
-
-            // std::cerr << "\tcheck\t" << best_score.first << "\t" << table.size() << "," << offset << " "
-            //           << max_pos_prev << "/" << window.size() << "\n";
 
             assert(i_cur == i);
             assert(node_cur == next);
