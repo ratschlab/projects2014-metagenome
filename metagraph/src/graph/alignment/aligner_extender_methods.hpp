@@ -97,6 +97,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                                    NodeType, size_t, char, size_t, size_t>> Table;
 
     Table table;
+    tsl::hopscotch_map<NodeType, ScoreVec> conv_checker;
 
     SeedFilter seed_filter_;
 

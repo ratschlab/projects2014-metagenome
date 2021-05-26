@@ -59,11 +59,39 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
         || seed.get_cigar().back().first == Cigar::MISMATCH);
     assert(seed.is_valid(graph_, &config_));
 
+    // auto it = conv_checker.find(seed.back());
+    // if (!seed_)
+    //     it = conv_checker.end();
+
+    // if (it != conv_checker.end()) {
+    //     const ScoreVec &s_merged = it->second;
+    //     size_t prev_start = seed_->get_clipping();
+    //     size_t prev_end = prev_start + s_merged.size() - 1;
+    //     size_t cur_end = seed.get_query().size() + seed.get_clipping();
+    //     // std::cerr << "check\t" << seed.back() << "\t" << seed << "\t" << prev_start << "," << prev_end << "\t" << cur_end << "\n";
+    //     if (cur_end <= prev_start || cur_end > prev_end
+    //             || s_merged.at(cur_end - prev_start) < seed.get_score()) {
+    //         // std::cerr << "\tfail\t" << cur_end - prev_start << "\t" << seed.get_score() << "\n";
+    //         // for (size_t j = 0; j < s_merged.size(); ++j) {
+    //             // std::cerr << (s_merged[j] == ninf ? -10 : s_merged[j]) << "\t";
+    //         // }
+    //         // std::cerr << "\n";
+    //         it = conv_checker.end();
+    //     }
+    // }
+
+    // if (it == conv_checker.end()) {
+    //     seed_ = &seed;
+    //     reset();
+    //     xdrop_cutoff_ = ninf;
+    //     table.clear();
+    //     conv_checker.clear();
     if (seed_filter_.labels_to_keep(seed).size()) {
         seed_ = &seed;
         reset();
         xdrop_cutoff_ = ninf;
         table.clear();
+        conv_checker.clear();
     } else {
         DEBUG_LOG("Skipping seed: {}", seed);
         seed_ = nullptr;
@@ -81,7 +109,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
 
-    // std::cerr << "starting\t" << *seed_ << "\t" << window.size() << "\n";
+    // std::cerr << "starting\t" << seed_->back() << "\t" << *seed_ << "\t" << window.size() << "\n";
 
     size_t start = seed_->get_query().data() - query_.data();
     const score_t *partial = partial_sums_.data() + start;
@@ -105,8 +133,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::priority_queue<Ref> queue;
     queue.emplace(best_score);
 
-    tsl::hopscotch_map<NodeType, ScoreVec> conv_checker;
-
     while (queue.size()) {
         size_t i = queue.top().second;
         queue.pop();
@@ -115,6 +141,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         size_t next_offset = -1;
 
         size_t begin = 0;
+        size_t loop_begin = 0;
         size_t end = window.size() + 1;
 
         {
@@ -135,23 +162,25 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (end == begin)
                 continue;
 
+            loop_begin = std::max(begin, (size_t)1);
+
             seed_filter_.update_seed_filter([&](const auto &callback) {
-                callback(node, 0, begin, end);
+                callback(node, 0, loop_begin + start - 1, end + start - 1);
             });
 
-            if (config_.num_alternative_paths == 1) {
-                bool has_extension = false;
-                for (size_t j = begin; j < end; ++j) {
-                    assert(partial[j] == config_.match_score(window.substr(j)));
-                    if (S[j] + partial[j] >= best_score.first) {
-                        has_extension = true;
-                        break;
-                    }
+            bool has_extension = false;
+            for (size_t j = begin; j < end; ++j) {
+                assert(partial[j] == config_.match_score(window.substr(j)));
+                score_t ext_score = S[j] + partial[j];
+                if ((config_.num_alternative_paths == 1 && ext_score >= best_score.first)
+                        || ext_score >= min_path_score) {
+                    has_extension = true;
+                    break;
                 }
-
-                if (!has_extension)
-                    continue;
             }
+
+            if (!has_extension)
+                continue;
 
             if (next_offset - seed_->get_offset() < seed_->get_sequence().size()) {
                 if (next_offset < graph_.get_k()) {
@@ -212,7 +241,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             const int8_t *profile_scores = profile_score_[c].data() + start;
             const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
-            size_t loop_begin = std::max(begin, (size_t)1);
 
             // update match and delete scores
             #pragma omp simd
@@ -404,6 +432,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             extensions.emplace_back(std::move(extension));
             // std::cerr << "ext\t" << extensions.back() << "\n";
+            // std::cerr << "\t";
+            // for (auto n : extensions.back()) {
+            //     std::cerr << n << " ";
+            // }
+            // std::cerr << "\n";
         }
     }
 
