@@ -1488,12 +1488,10 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
     config.min_exact_match = 0.0;
     config.max_nodes_per_seq_char = 10.0;
     config.num_alternative_paths = 3;
-    config.min_path_score = 0;
-    config.min_cell_score = 0;
 
     DBGAligner<> aligner(*graph, config);
     for (size_t i = 0; i < 3; ++i) {
-        EXPECT_EQ(3u, aligner.align(query).size());
+        EXPECT_EQ(3u, aligner.align(query).size()) << i;
     }
 }
 #endif

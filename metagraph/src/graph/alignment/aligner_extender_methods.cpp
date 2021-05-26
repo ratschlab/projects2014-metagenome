@@ -20,8 +20,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
                                                        const DBGAlignerConfig &config,
                                                        std::string_view query)
       : graph_(graph), config_(config), query_(query),
-        start_node_(graph_.max_index() + 1, '$', 0, 0),
-        seed_filter_(graph_.get_k()) {
+        start_node_(graph_.max_index() + 1, '$', 0, 0) {
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -59,39 +58,19 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
         || seed.get_cigar().back().first == Cigar::MISMATCH);
     assert(seed.is_valid(graph_, &config_));
 
-    // auto it = conv_checker.find(seed.back());
-    // if (!seed_)
-    //     it = conv_checker.end();
+    auto it = conv_checker.find(seed.back());
+    if (!seed_)
+        it = conv_checker.end();
 
-    // if (it != conv_checker.end()) {
-    //     const ScoreVec &s_merged = it->second;
-    //     size_t prev_start = seed_->get_clipping();
-    //     size_t prev_end = prev_start + s_merged.size() - 1;
-    //     size_t cur_end = seed.get_query().size() + seed.get_clipping();
-    //     // std::cerr << "check\t" << seed.back() << "\t" << seed << "\t" << prev_start << "," << prev_end << "\t" << cur_end << "\n";
-    //     if (cur_end <= prev_start || cur_end > prev_end
-    //             || s_merged.at(cur_end - prev_start) < seed.get_score()) {
-    //         // std::cerr << "\tfail\t" << cur_end - prev_start << "\t" << seed.get_score() << "\n";
-    //         // for (size_t j = 0; j < s_merged.size(); ++j) {
-    //             // std::cerr << (s_merged[j] == ninf ? -10 : s_merged[j]) << "\t";
-    //         // }
-    //         // std::cerr << "\n";
-    //         it = conv_checker.end();
-    //     }
-    // }
+    if (it != conv_checker.end()
+            && it->second.at(seed.get_query().size() + seed.get_clipping()) < seed.get_score())
+        it = conv_checker.end();
 
-    // if (it == conv_checker.end()) {
-    //     seed_ = &seed;
-    //     reset();
-    //     xdrop_cutoff_ = ninf;
-    //     table.clear();
-    //     conv_checker.clear();
-    if (seed_filter_.labels_to_keep(seed).size()) {
+    if (it == conv_checker.end()) {
         seed_ = &seed;
         reset();
         xdrop_cutoff_ = ninf;
         table.clear();
-        conv_checker.clear();
     } else {
         DEBUG_LOG("Skipping seed: {}", seed);
         seed_ = nullptr;
@@ -111,7 +90,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     // std::cerr << "starting\t" << seed_->back() << "\t" << *seed_ << "\t" << window.size() << "\n";
 
-    size_t start = seed_->get_query().data() - query_.data();
+    size_t start = seed_->get_clipping();
     const score_t *partial = partial_sums_.data() + start;
     assert(*partial == config_.match_score(window));
 
@@ -163,10 +142,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 continue;
 
             loop_begin = std::max(begin, (size_t)1);
-
-            seed_filter_.update_seed_filter([&](const auto &callback) {
-                callback(node, 0, loop_begin + start - 1, end + start - 1);
-            });
 
             bool has_extension = false;
             for (size_t j = begin; j < end; ++j) {
@@ -294,15 +269,18 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 auto it = conv_checker.find(next);
                 if (it == conv_checker.end()) {
-                    conv_checker.emplace(next, std::get<0>(table.back()));
+                    ScoreVec &s_merged = conv_checker.emplace(next, ScoreVec(query_.size() + 1, ninf)).first.value();
+                    const ScoreVec &s = std::get<0>(table.back());
+                    std::copy(s.begin() + loop_begin, s.begin() + end,
+                              s_merged.begin() + start + loop_begin);
                     queue.emplace(next_score);
                 } else {
                     ScoreVec &s_merged = it.value();
                     bool converged = true;
                     for (size_t j = begin; j < end; ++j) {
-                        if (S[j] > s_merged[j]) {
+                        if (S[j] > s_merged[start + j]) {
                             converged = false;
-                            s_merged[j] = S[j];
+                            s_merged[j + start] = S[j];
                         }
                     }
 
@@ -318,6 +296,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     if (table.size()) {
         std::vector<size_t> indices;
+        tsl::hopscotch_set<size_t> prev_starts;
         if (config_.num_alternative_paths == 1) {
             indices.push_back(best_score.second);
         } else {
@@ -334,6 +313,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (extensions.size() >= config_.num_alternative_paths)
                 break;
 
+            size_t j = indices[i];
+            if (!prev_starts.emplace(j).second)
+                continue;
+
             std::vector<NodeType> path;
             Cigar ops;
             std::string seq;
@@ -342,7 +325,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             size_t end_pos = 0;
             score_t score = 0;
 
-            size_t j = indices[i];
             {
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
                 if (S[max_pos] < min_path_score)
@@ -363,6 +345,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 assert(j != static_cast<size_t>(-1));
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
                 assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
+
+                if (pos == max_pos)
+                    prev_starts.emplace(j);
 
                 Cigar::Operator last_op = OS[pos];
                 switch (last_op) {

@@ -120,7 +120,7 @@ template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
 ::get_min_path_score(uint64_t target) const -> score_t {
     auto find = path_queue_.find(target);
-    return find == path_queue_.end() || find->second.empty()
+    return find == path_queue_.end() || find->second.size() < config_.num_alternative_paths
         ? config_.min_path_score
         : find->second.minimum()->get_score();
 }

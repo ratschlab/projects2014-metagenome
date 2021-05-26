@@ -5,7 +5,6 @@
 #include <tsl/hopscotch_set.h>
 
 #include "aligner_alignment.hpp"
-#include "aligner_seeder_methods.hpp"
 #include "common/aligned_vector.hpp"
 
 
@@ -98,10 +97,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     Table table;
     tsl::hopscotch_map<NodeType, ScoreVec> conv_checker;
-
-    SeedFilter seed_filter_;
-
-
 
     struct AlignNodeHash {
         uint64_t operator()(const AlignNode &x) const {
