@@ -108,7 +108,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
 
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    if (aligner_config.min_seed_length < k) {
+    if (aligner_config.min_seed_length && aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(dbg)) {
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(dbg);
@@ -129,8 +129,8 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
             );
         }
 
-    } else if (aligner_config.max_seed_length == k) {
-        assert(aligner_config.min_seed_length == k);
+    } else if (!aligner_config.max_seed_length || aligner_config.max_seed_length == k) {
+        assert(aligner_config.min_seed_length == k || !aligner_config.min_seed_length);
 
         // seeds are single k-mers
         return std::make_unique<Aligner<>>(graph, aligner_config);
