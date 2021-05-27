@@ -101,9 +101,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                        OpVec(window.size() + 1, Cigar::CLIPPED),
                        OpVec(window.size() + 1, Cigar::CLIPPED),
                        OpVec(window.size() + 1, Cigar::CLIPPED),
-                       seed_->front(), -1, '\0', seed_->get_offset() - 1, 0);
+                       seed_->front(), -1, '\0', seed_->get_offset() - 1, 0, 0);
 
-    score_t xdrop_cutoff = -config_.xdrop;
+    score_t xdrop_cutoff = std::max(-config_.xdrop, ninf + 1);
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
@@ -137,7 +137,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         size_t end = window.size() + 1;
 
         {
-            const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[i];
+            const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos, trim] = table[i];
             next_offset = offset + 1;
 
             if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char)
@@ -145,10 +145,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             auto in_range = [xdrop_cutoff](score_t s) { return s >= xdrop_cutoff; };
 
-            begin = std::find_if(S.begin(), S.end(), in_range) - S.begin();
-            end = std::find_if(S.rbegin(), S.rend(), in_range).base() - S.begin();
+            begin = std::find_if(S.begin(), S.end(), in_range) - S.begin() + trim;
+            end = std::find_if(S.rbegin(), S.rend(), in_range).base() - S.begin() + trim;
 
-            if (end != S.size())
+            if (end != window.size() + 1)
                 ++end;
 
             if (end == begin)
@@ -159,7 +159,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             bool has_extension = false;
             for (size_t j = begin; j < end; ++j) {
                 assert(partial[j] == config_.match_score(window.substr(j)));
-                score_t ext_score = S[j] + partial[j];
+                score_t ext_score = S[j - trim] + partial[j];
                 if ((config_.num_alternative_paths == 1 && ext_score >= std::get<0>(best_score))
                         || ext_score >= min_path_score) {
                     has_extension = true;
@@ -204,20 +204,20 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         for (const auto &[next, c] : outgoing) {
             assert(std::get<0>(best_score) > xdrop_cutoff);
 
-            table.emplace_back(ScoreVec(window.size() + 1, ninf),
-                               ScoreVec(window.size() + 1, ninf),
-                               ScoreVec(window.size() + 1, ninf),
-                               OpVec(window.size() + 1, Cigar::CLIPPED),
-                               OpVec(window.size() + 1, Cigar::CLIPPED),
-                               OpVec(window.size() + 1, Cigar::CLIPPED),
-                               next, i, c, next_offset, 0);
+            table.emplace_back(ScoreVec(end - begin, ninf),
+                               ScoreVec(end - begin, ninf),
+                               ScoreVec(end - begin, ninf),
+                               OpVec(end - begin, Cigar::CLIPPED),
+                               OpVec(end - begin, Cigar::CLIPPED),
+                               OpVec(end - begin, Cigar::CLIPPED),
+                               next, i, c, next_offset, 0, begin);
 
             const auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
-                         node_prev, i_prev, c_prev, offset_prev, max_pos_prev] = table[i];
+                         node_prev, i_prev, c_prev, offset_prev, max_pos_prev, trim_prev] = table[i];
 
-            auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos] = table.back();
+            auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos, trim] = table.back();
 
-            if (next != node_prev)
+            if (next != node_prev && !trim && !trim_prev)
                 S[0] = S_prev[0];
 
             assert(i_cur == i);
@@ -227,13 +227,16 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
 
             auto update_del = [&](size_t j, score_t &s_score, Cigar::Operator &s_op) {
-                score_t del_open = S_prev[j] + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[j] + config_.gap_extension_penalty;
+                if (j < trim_prev || j - trim_prev >= S_prev.size())
+                    return;
+
+                score_t del_open = S_prev[j - trim_prev] + config_.gap_opening_penalty;
+                score_t del_extend = F_prev[j - trim_prev] + config_.gap_extension_penalty;
                 score_t del_score = std::max(del_open, del_extend);
 
                 if (del_score >= xdrop_cutoff) {
-                    F[j] = del_score;
-                    OF[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                    F[j - trim] = del_score;
+                    OF[j - trim] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
                     if (del_score > s_score) {
                         s_score = del_score;
                         s_op = Cigar::DELETION;
@@ -241,7 +244,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             };
 
-            if (begin == 0 && next != node_prev)
+            if (!trim && begin == 0 && next != node_prev)
                 update_del(0, S[0], OS[0]);
 
             const int8_t *profile_scores = profile_score_[c].data() + start;
@@ -256,17 +259,16 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 // deletion
                 update_del(j, s_score, s_op);
 
-                std::ignore = profile_scores;
-                std::ignore = profile_ops;
-                // score_t match = S_prev[j - 1] + profile_scores[j];
-                score_t match = S_prev[j - 1] + config_.get_row(c)[window[j - 1]];
-                if (match > std::max(s_score, xdrop_cutoff - 1)) {
-                    s_score = match;
-                    s_op = (c == window[j - 1]) ? Cigar::MATCH : Cigar::MISMATCH;
+                if (j - 1 >= trim_prev && j - 1 - trim_prev < S_prev.size()) {
+                    score_t match = S_prev[j - 1 - trim_prev] + profile_scores[j];
+                    if (match > std::max(s_score, xdrop_cutoff - 1)) {
+                        s_score = match;
+                        s_op = profile_ops[j];
+                    }
                 }
 
-                S[j] = s_score;
-                OS[j] = s_op;
+                S[j - trim] = s_score;
+                OS[j - trim] = s_op;
             }
 
             // update insertion scores
@@ -274,18 +276,37 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             // be vectorized easily
             #pragma omp simd
             for (size_t j = loop_begin; j < end; ++j) {
-                score_t ins_open = S[j - 1] + config_.gap_opening_penalty;
-                score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
+                if (j - 1 >= trim && j - 1 - trim < S.size()) {
+                    score_t ins_open = S[j - 1 - trim] + config_.gap_opening_penalty;
+                    score_t ins_extend = E[j - 1 - trim] + config_.gap_extension_penalty;
+                    score_t ins_score = std::max(ins_open, ins_extend);
+
+                    if (ins_score >= xdrop_cutoff) {
+                        E[j - trim] = ins_score;
+                        OE[j - trim] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
+
+                        if (ins_score > S[j - trim]) {
+                            S[j - trim] = ins_score;
+                            OS[j - trim] = Cigar::INSERTION;
+                        }
+                    }
+                }
+            }
+
+            while (S.back() >= xdrop_cutoff && S.size() + trim < window.size() + 1) {
+                score_t ins_open = S.back() + config_.gap_opening_penalty;
+                score_t ins_extend = E.back() + config_.gap_extension_penalty;
                 score_t ins_score = std::max(ins_open, ins_extend);
 
                 if (ins_score >= xdrop_cutoff) {
-                    E[j] = ins_score;
-                    OE[j] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-
-                    if (ins_score > S[j]) {
-                        S[j] = ins_score;
-                        OS[j] = Cigar::INSERTION;
-                    }
+                    E.push_back(ins_score);
+                    S.push_back(ins_score);
+                    F.push_back(ninf);
+                    OE.push_back(ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH);
+                    OS.push_back(Cigar::INSERTION);
+                    OF.push_back(Cigar::CLIPPED);
+                } else {
+                    break;
                 }
             }
 
@@ -299,33 +320,32 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             // }
             // std::cerr << "\n";
 
-            max_pos = std::max_element(S.begin() + begin, S.begin() + end) - S.begin();
+            // TODO: find closest to diagonal
+            max_pos = std::max_element(S.begin(), S.end()) - S.begin() + trim;
             // std::cerr << "\t" << max_pos << "\t" << S[max_pos] << "\n";
 
-            if (S[max_pos] >= xdrop_cutoff) {
-                Ref next_score { S[max_pos], table.size() - 1, max_pos, offset };
+            if (S[max_pos - trim] >= xdrop_cutoff) {
+                Ref next_score { S[max_pos - trim], table.size() - 1, max_pos, offset };
 
-                if (S[max_pos] - xdrop_cutoff > config_.xdrop)
-                    xdrop_cutoff = S[max_pos] - config_.xdrop;
+                if (S[max_pos - trim] - xdrop_cutoff > config_.xdrop)
+                    xdrop_cutoff = S[max_pos - trim] - config_.xdrop;
 
-                if (S[max_pos] > std::get<0>(best_score)) {
+                if (S[max_pos - trim] > std::get<0>(best_score)) {
                     best_score = next_score;
                     queue.emplace(next_score);
                 } else {
                     auto it = conv_checker.find(next);
                     if (it == conv_checker.end()) {
                         ScoreVec &s_merged = conv_checker.emplace(next, ScoreVec(query_.size() + 1, ninf)).first.value();
-                        const ScoreVec &s = std::get<0>(table.back());
-                        std::copy(s.begin() + loop_begin, s.begin() + end,
-                                  s_merged.begin() + start + loop_begin);
+                        std::copy(S.begin(), S.end(), s_merged.begin() + start + begin);
                         queue.emplace(next_score);
                     } else {
                         ScoreVec &s_merged = it.value();
                         bool converged = true;
                         for (size_t j = begin; j < end; ++j) {
-                            if (S[j] > s_merged[start + j]) {
+                            if (S[j - trim] > s_merged[start + j]) {
                                 converged = false;
-                                s_merged[j + start] = S[j];
+                                s_merged[j + start] = S[j - trim];
                             }
                         }
 
@@ -351,7 +371,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             std::sort(indices.begin(), indices.end(), [this](size_t i, size_t j) {
                 const auto &a = table[i];
                 const auto &b = table[j];
-                return std::get<0>(a)[std::get<10>(a)] > std::get<0>(b)[std::get<10>(b)];
+                return std::get<0>(a)[std::get<10>(a) - std::get<11>(a)]
+                    > std::get<0>(b)[std::get<10>(b) - std::get<11>(b)];
             });
         }
 
@@ -373,19 +394,19 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             size_t align_offset = seed_->get_offset();
 
             {
-                const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
-                if (S[max_pos] < min_path_score)
+                const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
+                if (S[max_pos - trim] < min_path_score)
                     break;
 
                 if (offset < graph_.get_k() - 1)
                     continue;
 
-                if (OS[max_pos] != Cigar::MATCH && OS[max_pos] != Cigar::MISMATCH)
+                if (OS[max_pos - trim] != Cigar::MATCH)
                     continue;
 
                 pos = max_pos;
                 end_pos = max_pos;
-                score = S[pos];
+                score = S[pos - trim];
             }
 
             auto add_extension = [&](Cigar cigar,
@@ -418,13 +439,13 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             while (j) {
                 assert(j != static_cast<size_t>(-1));
-                const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
+                const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
                 assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
 
-                Cigar::Operator last_op = OS[pos];
+                Cigar::Operator last_op = OS[pos - trim];
                 align_offset = std::min(offset, graph_.get_k() - 1);
 
-                if (S[pos] == 0)
+                if (S[pos - trim] == 0)
                     add_extension(ops, path, seq);
 
                 if (pos == max_pos)
@@ -447,16 +468,17 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
                         while (last_op == Cigar::INSERTION) {
                             ops.append(last_op);
-                            last_op = OE[pos--];
+                            last_op = OE[pos - trim];
+                            --pos;
                         }
                         assert(last_op == Cigar::MATCH);
                     } break;
                     case Cigar::DELETION: {
                         while (last_op == Cigar::DELETION && j) {
-                            const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
+                            const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
                             // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
 
-                            last_op = OF[pos];
+                            last_op = OF[pos - trim];
                             if (offset >= graph_.get_k() - 1)
                                 path.emplace_back(node);
 

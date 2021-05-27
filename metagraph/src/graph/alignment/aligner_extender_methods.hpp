@@ -93,7 +93,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef std::pair<std::vector<Scores>, bool> Column;
 
     typedef std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, OpVec, OpVec, OpVec,
-                                   NodeType, size_t, char, size_t, size_t>> Table;
+                                   NodeType, size_t, char, size_t, size_t, size_t>> Table;
 
     Table table;
     tsl::hopscotch_map<NodeType, ScoreVec> conv_checker;
