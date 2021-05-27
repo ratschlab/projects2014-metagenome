@@ -21,7 +21,6 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
                                                        std::string_view query)
       : graph_(graph), config_(config), query_(query),
         start_node_(graph_.max_index() + 1, '$', 0, 0) {
-    // std::cerr << "query\n";
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -87,9 +86,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
-
-    // std::cerr << "start\t" << *seed_ << "\t" << window << "\n";
-    // std::cerr << "start\t" << *seed_ << "\n";
 
     size_t start = seed_->get_clipping();
     const score_t *partial = partial_sums_.data() + start;
@@ -181,21 +177,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         outgoing.emplace_back(next, c);
                 });
             }
-
-            // std::cerr << "\t" << c;
-            // for (const auto &[next, cc] : outgoing) {
-            //     std::cerr << "," << cc;
-            // }
-            // std::cerr << "\t" << S[max_pos] << "," << max_pos << "," << next_offset;
-            // // std::cerr << c << "," << outgoing.size() << "," << begin << "," << end;
-            // for (score_t s : S) {
-            //     if (s == ninf) {
-            //         std::cerr << "\te";
-            //     } else {
-            //         std::cerr << "\t" << s;
-            //     }
-            // }
-            // std::cerr << "\n";
         }
 
         for (const auto &[next, c] : outgoing) {
@@ -213,8 +194,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                          node_prev, i_prev, c_prev, offset_prev, max_pos_prev, trim_prev] = table[i];
 
             auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos, trim] = table.back();
-
-            // std::cerr << "\tnext\t" << node_cur << " " << table.size() << " " << std::get<0>(best_score) << " " << offset << " " << S.size() << "\n";
 
             if (next != node_prev && !trim && !trim_prev)
                 S[0] = S_prev[0];
@@ -296,14 +275,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            #pragma omp simd
-            for (size_t j = begin; j < end; ++j) {
-                if (std::make_pair(S[j - trim], std::abs(static_cast<ssize_t>(j) - static_cast<ssize_t>(offset + 1)))
-                        > std::make_pair(S[max_pos - trim], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(offset + 1)))) {
-                    max_pos = j;
-                }
-            }
-
             while (S.back() >= xdrop_cutoff && S.size() + trim < window.size() + 1) {
                 score_t ins_open = S.back() + config_.gap_opening_penalty;
                 score_t ins_extend = E.back() + config_.gap_extension_penalty;
@@ -321,19 +292,17 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            // std::cerr << c << "," << outgoing.size() << "," << begin << "," << end;
-            // for (score_t s : S) {
-            //     if (s == ninf) {
-            //         std::cerr << "\te";
-            //     } else {
-            //         std::cerr << "\t" << s;
-            //     }
-            // }
-            // std::cerr << "\n";
-
-            // TODO: find closest to diagonal
-            max_pos = std::max_element(S.begin(), S.end()) - S.begin() + trim;
-            // std::cerr << "\t" << max_pos << "\t" << S[max_pos] << "\n";
+            if (offset + 1 >= begin && offset + 1 < end) {
+                #pragma omp simd
+                for (size_t j = begin; j < end; ++j) {
+                    if (std::make_pair(S[j - trim], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(offset + 1)))
+                            > std::make_pair(S[max_pos - trim], std::abs(static_cast<ssize_t>(j) - static_cast<ssize_t>(offset + 1)))) {
+                        max_pos = j;
+                    }
+                }
+            } else {
+                max_pos = std::max_element(S.begin(), S.end()) - S.begin() + trim;
+            }
 
             if (S[max_pos - trim] >= xdrop_cutoff) {
                 Ref next_score { S[max_pos - trim], table.size() - 1, max_pos, offset };
@@ -442,9 +411,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 extension.extend_query_end(query_.data() + query_.size());
                 assert(extension.is_valid(graph_, &config_));
 
-                // std::cerr << "\text\t" << extension << "\n";
-                // std::cerr << "\text\t" << extension.get_cigar().to_string() << "\n";
-
                 extensions.emplace_back(std::move(extension));
             };
 
@@ -465,7 +431,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 switch (last_op) {
                     case Cigar::MATCH:
                     case Cigar::MISMATCH: {
-                        // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
                         if (offset >= graph_.get_k() - 1)
                             path.emplace_back(node);
 
@@ -476,7 +441,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         j = j_prev;
                     } break;
                     case Cigar::INSERTION: {
-                        // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
                         while (last_op == Cigar::INSERTION) {
                             ops.append(last_op);
                             last_op = OE[pos - trim];
@@ -487,7 +451,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     case Cigar::DELETION: {
                         while (last_op == Cigar::DELETION && j) {
                             const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
-                            // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
 
                             last_op = OF[pos - trim];
                             if (offset >= graph_.get_k() - 1)
@@ -500,14 +463,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         }
                         assert(last_op == Cigar::MATCH || !j);
                     } break;
-                    case Cigar::CLIPPED: {
-                        // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
-                        j = 0;
-                    } break;
+                    case Cigar::CLIPPED: { j = 0; } break;
                 }
             }
-
-            // std::cerr << "\n";
 
             add_extension(std::move(ops), std::move(path), std::move(seq));
         }
