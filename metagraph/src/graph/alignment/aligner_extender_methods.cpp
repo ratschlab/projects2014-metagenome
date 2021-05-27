@@ -84,10 +84,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     if (!seed_)
         return extensions;
 
-    // std::cerr << "start\t" << *seed_ << "\n";
 
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
+
+    // std::cerr << "start\t" << *seed_ << "\t" << window << "\n";
+    // std::cerr << "start\t" << *seed_ << "\n";
 
     size_t start = seed_->get_clipping();
     const score_t *partial = partial_sums_.data() + start;
@@ -105,14 +107,26 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
-    using Ref = std::pair<score_t, size_t>;
-    Ref best_score { 0, 0 };
+    using Ref = std::tuple<score_t,
+                           size_t /* table idx */,
+                           ssize_t /* max pos */,
+                           ssize_t /* offset */>;
+    Ref best_score { 0, 0, 0, seed_->get_offset() - 1 };
 
-    std::priority_queue<Ref> queue;
+    struct RefCmp {
+        bool operator()(const Ref &a, const Ref &b) const {
+            const auto &[a_score, a_id, a_max_pos, a_offset] = a;
+            const auto &[b_score, b_id, b_max_pos, b_offset] = b;
+            return std::make_pair(a_score, std::abs(b_max_pos - b_offset))
+                < std::make_pair(b_score, std::abs(a_max_pos - a_offset));
+        }
+    };
+
+    std::priority_queue<Ref, std::vector<Ref>, RefCmp> queue;
     queue.emplace(best_score);
 
     while (queue.size()) {
-        size_t i = queue.top().second;
+        size_t i = std::get<1>(queue.top());
         queue.pop();
 
         std::vector<std::pair<NodeType, char>> outgoing;
@@ -146,7 +160,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             for (size_t j = begin; j < end; ++j) {
                 assert(partial[j] == config_.match_score(window.substr(j)));
                 score_t ext_score = S[j] + partial[j];
-                if ((config_.num_alternative_paths == 1 && ext_score >= best_score.first)
+                if ((config_.num_alternative_paths == 1 && ext_score >= std::get<0>(best_score))
                         || ext_score >= min_path_score) {
                     has_extension = true;
                     break;
@@ -170,10 +184,25 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         outgoing.emplace_back(next, c);
                 });
             }
+
+            // std::cerr << "\t" << c;
+            // for (const auto &[next, cc] : outgoing) {
+            //     std::cerr << "," << cc;
+            // }
+            // std::cerr << "\t" << S[max_pos] << "," << max_pos << "," << next_offset;
+            // // std::cerr << c << "," << outgoing.size() << "," << begin << "," << end;
+            // for (score_t s : S) {
+            //     if (s == ninf) {
+            //         std::cerr << "\te";
+            //     } else {
+            //         std::cerr << "\t" << s;
+            //     }
+            // }
+            // std::cerr << "\n";
         }
 
         for (const auto &[next, c] : outgoing) {
-            assert(best_score.first > xdrop_cutoff);
+            assert(std::get<0>(best_score) > xdrop_cutoff);
 
             table.emplace_back(ScoreVec(window.size() + 1, ninf),
                                ScoreVec(window.size() + 1, ninf),
@@ -189,7 +218,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             auto &[S, E, F, OS, OE, OF, node_cur, i_cur, c_stored, offset, max_pos] = table.back();
 
             if (next != node_prev)
-                S[0] = 0;
+                S[0] = S_prev[0];
 
             assert(i_cur == i);
             assert(node_cur == next);
@@ -225,13 +254,15 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 Cigar::Operator s_op = Cigar::CLIPPED;
 
                 // deletion
-                if (next != node_prev)
-                    update_del(j, s_score, s_op);
+                update_del(j, s_score, s_op);
 
-                score_t match = S_prev[j - 1] + profile_scores[j];
+                std::ignore = profile_scores;
+                std::ignore = profile_ops;
+                // score_t match = S_prev[j - 1] + profile_scores[j];
+                score_t match = S_prev[j - 1] + config_.get_row(c)[window[j - 1]];
                 if (match > std::max(s_score, xdrop_cutoff - 1)) {
                     s_score = match;
-                    s_op = profile_ops[j];
+                    s_op = (c == window[j - 1]) ? Cigar::MATCH : Cigar::MISMATCH;
                 }
 
                 S[j] = s_score;
@@ -258,15 +289,26 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
+            // std::cerr << c << "," << outgoing.size() << "," << begin << "," << end;
+            // for (score_t s : S) {
+            //     if (s == ninf) {
+            //         std::cerr << "\te";
+            //     } else {
+            //         std::cerr << "\t" << s;
+            //     }
+            // }
+            // std::cerr << "\n";
+
             max_pos = std::max_element(S.begin() + begin, S.begin() + end) - S.begin();
+            // std::cerr << "\t" << max_pos << "\t" << S[max_pos] << "\n";
 
             if (S[max_pos] >= xdrop_cutoff) {
-                Ref next_score { S[max_pos], table.size() - 1 };
+                Ref next_score { S[max_pos], table.size() - 1, max_pos, offset };
 
                 if (S[max_pos] - xdrop_cutoff > config_.xdrop)
                     xdrop_cutoff = S[max_pos] - config_.xdrop;
 
-                if (S[max_pos] > best_score.first) {
+                if (S[max_pos] > std::get<0>(best_score)) {
                     best_score = next_score;
                     queue.emplace(next_score);
                 } else {
@@ -302,7 +344,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         std::vector<size_t> indices;
         tsl::hopscotch_set<size_t> prev_starts;
         if (config_.num_alternative_paths == 1) {
-            indices.push_back(best_score.second);
+            indices.push_back(std::get<1>(best_score));
         } else {
             indices.resize(table.size());
             std::iota(indices.begin(), indices.end(), 0);
@@ -369,6 +411,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 assert(extension.is_valid(graph_, &config_));
 
                 // std::cerr << "\text\t" << extension << "\n";
+                // std::cerr << "\text\t" << extension.get_cigar().to_string() << "\n";
 
                 extensions.emplace_back(std::move(extension));
             };
