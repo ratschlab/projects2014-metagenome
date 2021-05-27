@@ -59,8 +59,6 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     assert(seed.is_valid(graph_, &config_));
 
     auto it = conv_checker.find(seed.back());
-    if (!seed_)
-        it = conv_checker.end();
 
     if (it != conv_checker.end()
             && it->second.at(seed.get_query().size() + seed.get_clipping()) < seed.get_score())
@@ -87,8 +85,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
-
-    // std::cerr << "starting\t" << seed_->back() << "\t" << *seed_ << "\t" << window.size() << "\n";
 
     size_t start = seed_->get_clipping();
     const score_t *partial = partial_sums_.data() + start;
@@ -127,8 +123,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos] = table[i];
             next_offset = offset + 1;
 
-            // if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char)
-            //     continue;
+            if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char)
+                continue;
 
             begin = std::find_if(S.begin(), S.end(),
                                  [&](score_t s) { return s >= xdrop_cutoff; }) - S.begin();
@@ -416,12 +412,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(extension.is_valid(graph_, &config_));
 
             extensions.emplace_back(std::move(extension));
-            // std::cerr << "ext\t" << extensions.back() << "\n";
-            // std::cerr << "\t";
-            // for (auto n : extensions.back()) {
-            //     std::cerr << n << " ";
-            // }
-            // std::cerr << "\n";
         }
     }
 
