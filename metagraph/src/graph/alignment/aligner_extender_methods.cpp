@@ -210,7 +210,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                                OpVec(end - begin, Cigar::CLIPPED),
                                OpVec(end - begin, Cigar::CLIPPED),
                                OpVec(end - begin, Cigar::CLIPPED),
-                               next, i, c, next_offset, 0, begin);
+                               next, i, c, next_offset, begin, begin);
 
             const auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
                          node_prev, i_prev, c_prev, offset_prev, max_pos_prev, trim_prev] = table[i];
@@ -290,6 +290,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             OS[j - trim] = Cigar::INSERTION;
                         }
                     }
+                }
+            }
+
+            #pragma omp simd
+            for (size_t j = begin; j < end; ++j) {
+                if (std::make_pair(S[j - trim], std::abs(static_cast<ssize_t>(j) - static_cast<ssize_t>(offset + 1)))
+                        > std::make_pair(S[max_pos - trim], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(offset + 1)))) {
+                    max_pos = j;
                 }
             }
 
