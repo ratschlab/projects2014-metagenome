@@ -315,7 +315,15 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         if (pos_seeds.empty())
             continue;
 
-        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin()));
+        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin(),
+                          [](const Seed &a, const Seed &b) {
+            return a.get_orientation() == b.get_orientation()
+                && a.get_offset() == b.get_offset()
+                && a.get_score() == b.get_score()
+                && a.get_query() == b.get_query()
+                && a.get_sequence() == b.get_sequence()
+                && a.get_cigar() == b.get_cigar();
+        }));
 
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
