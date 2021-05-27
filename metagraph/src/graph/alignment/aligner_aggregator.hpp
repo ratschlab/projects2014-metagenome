@@ -89,6 +89,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     auto add_to_target = [&](uint64_t target) {
         auto &cur_queue = path_queue_[target];
 
+        for (const auto &aln : cur_queue) {
+            if (*packaged_alignment == *aln)
+                return;
+        }
+
         if (cur_queue.size() < config_.num_alternative_paths) {
             cur_queue.emplace(packaged_alignment);
         } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {

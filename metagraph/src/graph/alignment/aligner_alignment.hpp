@@ -151,10 +151,12 @@ class Alignment {
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
+            && offset_ == other.offset_
             && score_ == other.score_
-            && sequence_ == other.sequence_
             && query_ == other.query_
-            && cigar_ == other.cigar_;
+            && sequence_ == other.sequence_
+            && cigar_ == other.cigar_
+            && nodes_ == other.nodes_;
     }
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
