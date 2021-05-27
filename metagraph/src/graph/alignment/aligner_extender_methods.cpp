@@ -225,53 +225,56 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(offset == offset_prev + 1);
             assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
 
-            auto update_del = [&](size_t j, score_t &s_score, Cigar::Operator &s_op) {
-                assert(j >= trim_prev);
-                if (j - trim_prev >= S_prev.size())
-                    return;
+            const int8_t *profile_scores = profile_score_[c].data() + start;
+            const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
 
-                score_t del_open = S_prev[j - trim_prev] + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[j - trim_prev] + config_.gap_extension_penalty;
+            // match scores
+            size_t loop_begin = std::max({ begin, trim_prev });
+            size_t loop_end = std::min({ S_prev.size() + trim_prev, end - 1 });
+
+            auto update_match = [S_prev_v=S_prev.data() - trim_prev,
+                                 S_v=S.data() - begin + 1,
+                                 OS_v=OS.data() - begin + 1,
+                                 profile_scores,profile_ops,xdrop_cutoff](size_t j) {
+                score_t match = S_prev_v[j] + profile_scores[j + 1];
+                if (match > std::max(S_v[j], xdrop_cutoff - 1)) {
+                    S_v[j] = match;
+                    OS_v[j] = profile_ops[j + 1];
+                }
+            };
+
+            auto update_del = [S_prev_v=S_prev.data() - trim_prev,
+                               F_prev_v=F_prev.data() - trim_prev,
+                               F_v=F.data() - begin,
+                               S_v=S.data() - begin,
+                               OS_v=OS.data() - begin,
+                               OF_v=OF.data() - begin,
+                               this,xdrop_cutoff](size_t j) {
+                score_t del_open = S_prev_v[j] + config_.gap_opening_penalty;
+                score_t del_extend = F_prev_v[j] + config_.gap_extension_penalty;
                 score_t del_score = std::max(del_open, del_extend);
 
                 if (del_score >= xdrop_cutoff) {
-                    F[j - trim] = del_score;
-                    OF[j - trim] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-                    if (del_score > s_score) {
-                        s_score = del_score;
-                        s_op = Cigar::DELETION;
+                    F_v[j] = del_score;
+                    OF_v[j] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                    if (del_score > S_v[j]) {
+                        S_v[j] = del_score;
+                        OS_v[j] = Cigar::DELETION;
                     }
                 }
             };
 
-            if (!trim && begin == 0 && next != node_prev)
-                update_del(0, S[0], OS[0]);
+            if (loop_begin > begin)
+                update_match(begin);
 
-            const int8_t *profile_scores = profile_score_[c].data() + start;
-            const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
-
-            size_t loop_begin = std::max(begin, (size_t)1);
-            // update match and delete scores
             #pragma omp simd
-            for (size_t j = loop_begin; j < end; ++j) {
-                score_t s_score = ninf;
-                Cigar::Operator s_op = Cigar::CLIPPED;
-
-                // deletion
-                update_del(j, s_score, s_op);
-
-                assert(j - 1 - trim_prev < S_prev.size());
-                if (j - 1 >= trim_prev) {
-                    score_t match = S_prev[j - 1 - trim_prev] + profile_scores[j];
-                    if (match > std::max(s_score, xdrop_cutoff - 1)) {
-                        s_score = match;
-                        s_op = profile_ops[j];
-                    }
-                }
-
-                S[j - trim] = s_score;
-                OS[j - trim] = s_op;
+            for (size_t j = loop_begin; j < loop_end; ++j) {
+                update_match(j);
+                update_del(j);
             }
+
+            if (end - 1 > loop_end)
+                update_del(end - 1);
 
             // update insertion scores
             // since each element is dependent on the previous one, this can't
