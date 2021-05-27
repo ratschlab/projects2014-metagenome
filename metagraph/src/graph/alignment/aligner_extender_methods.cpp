@@ -125,10 +125,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::priority_queue<Ref, std::vector<Ref>, RefCmp> queue;
     queue.emplace(best_score);
 
-    size_t num_unoptim_steps = 0;
-    constexpr size_t max_num_unoptim_steps = 20;
-
-    while (queue.size() && num_unoptim_steps < max_num_unoptim_steps) {
+    while (queue.size()) {
         size_t i = std::get<1>(queue.top());
         queue.pop();
 
@@ -143,7 +140,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const auto &[S, E, F, OS, OE, OF, node, i_prev, c, offset, max_pos, trim] = table[i];
             next_offset = offset + 1;
 
-            if (static_cast<double>(next_offset) / window.size() >= config_.max_nodes_per_seq_char)
+            if (static_cast<double>(table.size()) / window.size() >= config_.max_nodes_per_seq_char)
                 continue;
 
             auto in_range = [xdrop_cutoff](score_t s) { return s >= xdrop_cutoff; };
@@ -345,7 +342,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 if (S[max_pos - trim] > std::get<0>(best_score)) {
                     best_score = next_score;
-                    num_unoptim_steps = 0;
                     queue.emplace(next_score);
                 } else {
                     auto it = conv_checker.find(next);
@@ -363,10 +359,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             }
                         }
 
-                        if (!converged) {
+                        if (!converged)
                             queue.emplace(next_score);
-                            ++num_unoptim_steps;
-                        }
                     }
                 }
 
