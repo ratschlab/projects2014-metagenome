@@ -185,8 +185,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
-    if (dbg_succ) {
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         const auto &boss = dbg_succ->get_boss();
         dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(&rev_seq[1], get_k() - 1),
@@ -206,13 +205,12 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != npos)
-                continue;
-
-            rev_seq[0] = complement(alphabet[c]);
-            node_index next = graph_.kmer_to_node(rev_seq);
-            if (next != npos)
-                children[c] = next + offset_;
+            if (alphabet[c] != boss::BOSS::kSentinel && children[c] == npos) {
+                rev_seq[0] = complement(alphabet[c]);
+                node_index next = graph_.kmer_to_node(rev_seq);
+                if (next != npos)
+                    children[c] = next + offset_;
+            }
         }
     }
 }
@@ -240,7 +238,7 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        std::vector<node_index> children(alphabet.size());
+        std::vector<node_index> children(alphabet.size(), npos);
         size_t max_num_edges_left = children.size() - has_sentinel_;
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
@@ -312,13 +310,12 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != npos)
-                continue;
-
-            rev_seq.back() = complement(alphabet[c]);
-            node_index prev = graph_.kmer_to_node(rev_seq);
-            if (prev != npos)
-                parents[c] = prev + offset_;
+            if (alphabet[c] != boss::BOSS::kSentinel && parents[c] == npos) {
+                rev_seq.back() = complement(alphabet[c]);
+                node_index prev = graph_.kmer_to_node(rev_seq);
+                if (prev != npos)
+                    parents[c] = prev + offset_;
+            }
         }
     }
 }
@@ -346,7 +343,7 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        std::vector<node_index> parents(alphabet.size());
+        std::vector<node_index> parents(alphabet.size(), npos);
         size_t max_num_edges_left = parents.size() - has_sentinel_;
 
         graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
