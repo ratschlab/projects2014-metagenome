@@ -1259,35 +1259,41 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 
     EXPECT_TRUE(graph->find(match, 1.0));
 
-    for (size_t xdrop : { 27, 30 }) {
-        for (double discovery_fraction : { 0.0, 1.0 }) {
-            DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
-            config.gap_opening_penalty = -5;
-            config.gap_extension_penalty = -2;
-            config.xdrop = xdrop;
-            config.min_exact_match = discovery_fraction;
-            config.max_nodes_per_seq_char = 10.0;
-            config.num_alternative_paths = 2;
-            config.min_path_score = 0;
-            config.min_cell_score = 0;
-            config.min_seed_length = k;
+    for (double nodes_per_seq_char : { 10.0, std::numeric_limits<double>::max() }) {
+        for (size_t xdrop : { 27, 30 }) {
+            for (double discovery_fraction : { 0.0, 1.0 }) {
+                DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+                config.gap_opening_penalty = -5;
+                config.gap_extension_penalty = -2;
+                config.xdrop = xdrop;
+                config.min_exact_match = discovery_fraction;
+                config.max_nodes_per_seq_char = nodes_per_seq_char;
+                config.num_alternative_paths = 2;
+                config.min_path_score = 0;
+                config.min_cell_score = 0;
+                config.min_seed_length = k;
 
-            DBGAligner<> aligner(*graph, config);
-            auto paths = aligner.align(query);
+                DBGAligner<> aligner(*graph, config);
+                auto paths = aligner.align(query);
 
-            if (discovery_fraction == 0.0) {
-                ASSERT_EQ(2ull, paths.size());
-                EXPECT_EQ(557llu, paths[0].get_score()) << xdrop << "\n" << paths[0];
-                EXPECT_EQ(556llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
-                EXPECT_NE(paths[0], paths[1]);
-            } else {
-                EXPECT_EQ(0ull, paths.size());
+                if (discovery_fraction == 0.0) {
+                    ASSERT_EQ(2ull, paths.size());
+                    EXPECT_EQ(557llu, paths[0].get_score()) << xdrop << "\n" << paths[0];
+                    if (nodes_per_seq_char == 10.0) {
+                        EXPECT_EQ(556llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
+                    } else {
+                        EXPECT_EQ(557llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
+                    }
+                    EXPECT_NE(paths[0], paths[1]);
+                } else {
+                    EXPECT_EQ(0ull, paths.size());
+                }
+
+                paths = aligner.align(match);
+                ASSERT_LE(1ull, paths.size());
+                EXPECT_EQ(match, paths[0].get_sequence());
+                EXPECT_TRUE(paths[0].is_exact_match());
             }
-
-            paths = aligner.align(match);
-            ASSERT_LE(1ull, paths.size());
-            EXPECT_EQ(match, paths[0].get_sequence());
-            EXPECT_TRUE(paths[0].is_exact_match());
         }
     }
 }
