@@ -149,7 +149,7 @@ class TestDNAAlign(TestingBase):
         last_split = params_str[5].split("\t")
         self.assertEqual(last_split[0], "MT-11/1")
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
-        self.assertEqual(last_split[4], "22")
+        self.assertEqual(last_split[4], "235")
 
     @parameterized.expand(['succinct'])
     def test_simple_align_canonical_subk_succinct(self, representation):
@@ -212,7 +212,7 @@ class TestDNAAlign(TestingBase):
         last_split = params_str[5].split("\t")
         self.assertEqual(last_split[0], "MT-11/1")
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
-        self.assertEqual(last_split[4], "22")
+        self.assertEqual(last_split[4], "235")
 
     @parameterized.expand(['succinct'])
     def test_simple_align_primary_subk_succinct(self, representation):

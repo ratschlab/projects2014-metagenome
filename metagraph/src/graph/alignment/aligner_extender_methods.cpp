@@ -21,6 +21,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
                                                        std::string_view query)
       : graph_(graph), config_(config), query_(query),
         start_node_(graph_.max_index() + 1, '$', 0, 0) {
+    // std::cerr << "query\n";
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -345,15 +346,47 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 score = S[pos];
             }
 
+            auto add_extension = [&](Cigar cigar,
+                                     std::vector<NodeType> final_path,
+                                     std::string match) {
+                assert(final_path.size());
+                cigar.append(Cigar::CLIPPED, pos);
+
+                std::reverse(cigar.begin(), cigar.end());
+                std::reverse(final_path.begin(), final_path.end());
+                std::reverse(match.begin(), match.end());
+
+                Alignment<NodeType> extension(
+                    window.substr(pos, end_pos - pos),
+                    std::move(final_path), std::move(match), score, std::move(cigar),
+                    0, seed_->get_orientation(), align_offset
+                );
+                assert(extension.is_valid(graph_, &config_));
+
+                extension.trim_offset();
+                extension.extend_query_begin(query_.data());
+                extension.extend_query_end(query_.data() + query_.size());
+                assert(extension.is_valid(graph_, &config_));
+
+                // std::cerr << "\text\t" << extension << "\n";
+
+                extensions.emplace_back(std::move(extension));
+            };
+
             while (j) {
                 assert(j != static_cast<size_t>(-1));
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos] = table[j];
                 assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
 
+                Cigar::Operator last_op = OS[pos];
+                align_offset = std::min(offset, graph_.get_k() - 1);
+
+                if (S[pos] == 0)
+                    add_extension(ops, path, seq);
+
                 if (pos == max_pos)
                     prev_starts.emplace(j);
 
-                Cigar::Operator last_op = OS[pos];
                 switch (last_op) {
                     case Cigar::MATCH:
                     case Cigar::MISMATCH: {
@@ -393,43 +426,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     } break;
                     case Cigar::CLIPPED: {
                         // std::cerr << "\t" << j << "," << pos << "," << node << "," << Cigar::opt_to_char(last_op);
-                        align_offset = std::min(std::get<9>(table[j]) + 1, graph_.get_k() - 1);
                         j = 0;
-                        // std::reverse(ops.begin(), ops.end());
-                        // common::logger->error(
-                        //     "Invalid traceback:\nSeed: {}\tAlignment: {}\tTable index: {}\tPos: {}",
-                        //     *seed_, ops.to_string(), j, pos
-                        // );
-                        // throw std::runtime_error("Terminating");
                     } break;
                 }
             }
 
             // std::cerr << "\n";
 
-            ops.append(Cigar::CLIPPED, pos);
-
-            assert(path.size());
-
-            std::reverse(ops.begin(), ops.end());
-            std::reverse(path.begin(), path.end());
-            std::reverse(seq.begin(), seq.end());
-
-            Alignment<NodeType> extension(
-                window.substr(pos, end_pos - pos),
-                std::move(path), std::move(seq), score, std::move(ops),
-                0, seed_->get_orientation(), align_offset
-            );
-            assert(extension.is_valid(graph_, &config_));
-
-            extension.trim_offset();
-            extension.extend_query_begin(query_.data());
-            extension.extend_query_end(query_.data() + query_.size());
-            assert(extension.is_valid(graph_, &config_));
-
-            // std::cerr << "\text\t" << extension << "\n";
-
-            extensions.emplace_back(std::move(extension));
+            add_extension(std::move(ops), std::move(path), std::move(seq));
         }
     }
 
