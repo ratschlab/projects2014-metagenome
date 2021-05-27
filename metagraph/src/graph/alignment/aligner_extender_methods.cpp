@@ -133,7 +133,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         size_t next_offset = -1;
 
         size_t begin = 0;
-        size_t loop_begin = 0;
         size_t end = window.size() + 1;
 
         {
@@ -153,8 +152,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             if (end == begin)
                 continue;
-
-            loop_begin = std::max(begin, (size_t)1);
 
             bool has_extension = false;
             for (size_t j = begin; j < end; ++j) {
@@ -229,7 +226,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
 
             auto update_del = [&](size_t j, score_t &s_score, Cigar::Operator &s_op) {
-                if (j < trim_prev || j - trim_prev >= S_prev.size())
+                assert(j >= trim_prev);
+                if (j - trim_prev >= S_prev.size())
                     return;
 
                 score_t del_open = S_prev[j - trim_prev] + config_.gap_opening_penalty;
@@ -252,6 +250,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             const int8_t *profile_scores = profile_score_[c].data() + start;
             const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
 
+            size_t loop_begin = std::max(begin, (size_t)1);
             // update match and delete scores
             #pragma omp simd
             for (size_t j = loop_begin; j < end; ++j) {
@@ -261,7 +260,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 // deletion
                 update_del(j, s_score, s_op);
 
-                if (j - 1 >= trim_prev && j - 1 - trim_prev < S_prev.size()) {
+                assert(j - 1 - trim_prev < S_prev.size());
+                if (j - 1 >= trim_prev) {
                     score_t match = S_prev[j - 1 - trim_prev] + profile_scores[j];
                     if (match > std::max(s_score, xdrop_cutoff - 1)) {
                         s_score = match;
@@ -277,20 +277,18 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             // since each element is dependent on the previous one, this can't
             // be vectorized easily
             #pragma omp simd
-            for (size_t j = loop_begin; j < end; ++j) {
-                if (j - 1 >= trim && j - 1 - trim < S.size()) {
-                    score_t ins_open = S[j - 1 - trim] + config_.gap_opening_penalty;
-                    score_t ins_extend = E[j - 1 - trim] + config_.gap_extension_penalty;
-                    score_t ins_score = std::max(ins_open, ins_extend);
+            for (size_t j = begin + 1; j < end; ++j) {
+                score_t ins_open = S[j - 1 - begin] + config_.gap_opening_penalty;
+                score_t ins_extend = E[j - 1 - begin] + config_.gap_extension_penalty;
+                score_t ins_score = std::max(ins_open, ins_extend);
 
-                    if (ins_score >= xdrop_cutoff) {
-                        E[j - trim] = ins_score;
-                        OE[j - trim] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
+                if (ins_score >= xdrop_cutoff) {
+                    E[j - begin] = ins_score;
+                    OE[j - begin] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-                        if (ins_score > S[j - trim]) {
-                            S[j - trim] = ins_score;
-                            OS[j - trim] = Cigar::INSERTION;
-                        }
+                    if (ins_score > S[j - begin]) {
+                        S[j - begin] = ins_score;
+                        OS[j - begin] = Cigar::INSERTION;
                     }
                 }
             }
