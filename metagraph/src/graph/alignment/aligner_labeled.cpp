@@ -154,43 +154,23 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() {
 
 template <typename NodeType>
 void LabeledBacktrackingExtender<NodeType>
-::process_extension(DBGAlignment&& extension,
+::process_extension(DBGAlignment&& alignment,
                     const std::vector<size_t> &trace,
                     tsl::hopscotch_set<size_t> &prev_starts,
-                    const std::function<void(DBGAlignment&&)> &callback) const {
-    DefaultColumnExtender<NodeType>::process_extension(
-        std::move(extension), trace, prev_starts, callback
-    );
-}
+                    const std::function<void(DBGAlignment&&)> &callback) {
+    assert(alignment.is_valid(this->graph_, &this->config_));
+    assert(trace.size() == alignment.size());
 
-template <typename NodeType>
-auto LabeledBacktrackingExtender<NodeType>
-::backtrack(score_t min_path_score,
-            AlignNode best_node,
-            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-            std::vector<DBGAlignment> &extensions) -> std::vector<AlignNode> {
-    size_t target_id = targets_[std::get<0>(best_node)];
-    if (!target_id)
-        return {};
-
-    std::vector<DBGAlignment> next_extension;
-    tsl::hopscotch_set<AlignNode, AlignNodeHash> dummy;
-    auto track = DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
-                                                            dummy, next_extension);
-
-    assert(next_extension.size() <= 1);
-    if (next_extension.empty() || next_extension[0].get_offset()) {
-        prev_starts.insert(dummy.begin(), dummy.end());
-        return track;
+    if (alignment.empty() || alignment.get_offset()) {
+        prev_starts.insert(trace.begin(), trace.end());
+        return;
     }
 
-    dummy = tsl::hopscotch_set<AlignNode, AlignNodeHash>();
+    size_t target_id = targets_[alignment.back()];
+    if (!target_id)
+        return;
 
     Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
-
-    DBGAlignment alignment = std::move(next_extension[0]);
-    assert(alignment.is_valid(this->graph_, &this->config_));
-    assert(alignment.back() == std::get<0>(best_node));
 
     AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
     while (!suffix.get_added_offset())
@@ -206,9 +186,7 @@ auto LabeledBacktrackingExtender<NodeType>
 
     suffix_shift();
 
-    assert(track.size() == alignment.size());
-    auto it = track.begin();
-    assert(it != track.end());
+    auto it = trace.begin();
 
     bool skipped = false;
     prev_starts.emplace(*it);
@@ -233,7 +211,7 @@ auto LabeledBacktrackingExtender<NodeType>
         aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
 
         if (aln_suffix.target_columns.size())
-            extensions.emplace_back(std::move(aln_suffix));
+            callback(std::move(aln_suffix));
     };
 
     for (size_t i = alignment.size() - 1; i > 0; --i) {
@@ -246,7 +224,7 @@ auto LabeledBacktrackingExtender<NodeType>
         if (inter.empty())
             break;
 
-        assert(it != track.end());
+        assert(it != trace.end());
         if ((!skipped && inter.size() == target_intersection.size())
                 || inter.size() == cur_targets.size()) {
             prev_starts.emplace(*it);
@@ -290,8 +268,15 @@ auto LabeledBacktrackingExtender<NodeType>
             && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
         aln_from_suffix();
     }
+}
 
-    return track;
+template <typename NodeType>
+auto LabeledBacktrackingExtender<NodeType>
+::backtrack(score_t,
+            AlignNode,
+            tsl::hopscotch_set<AlignNode, AlignNodeHash> &,
+            std::vector<DBGAlignment> &) -> std::vector<AlignNode> {
+    return {};
 }
 
 template class LabeledBacktrackingExtender<>;

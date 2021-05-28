@@ -142,7 +142,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual void process_extension(DBGAlignment&& extension,
                                    const std::vector<size_t> &trace,
                                    tsl::hopscotch_set<size_t> &prev_starts,
-                                   const std::function<void(DBGAlignment&&)> &callback) const;
+                                   const std::function<void(DBGAlignment&&)> &callback);
 
     virtual bool update_seed_filter(size_t j);
 

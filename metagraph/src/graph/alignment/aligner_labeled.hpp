@@ -85,7 +85,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual void process_extension(DBGAlignment&& extension,
                                    const std::vector<size_t> &trace,
                                    tsl::hopscotch_set<size_t> &prev_starts,
-                                   const std::function<void(DBGAlignment&&)> &callback) const override;
+                                   const std::function<void(DBGAlignment&&)> &callback) override;
 
     virtual bool update_seed_filter(size_t j) override;
 

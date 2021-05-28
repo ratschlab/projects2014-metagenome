@@ -128,13 +128,14 @@ void Alignment<NodeType>::append(Alignment&& other) {
 }
 
 template <typename NodeType>
-void Alignment<NodeType>::trim_offset() {
+size_t Alignment<NodeType>::trim_offset() {
     if (!offset_ || nodes_.size() <= 1)
-        return;
+        return 0;
 
     size_t trim = std::min(offset_, nodes_.size() - 1);
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    return trim;
 }
 
 template <typename NodeType>

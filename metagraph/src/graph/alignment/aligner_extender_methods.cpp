@@ -80,11 +80,8 @@ void DefaultColumnExtender<NodeType>
 ::process_extension(DBGAlignment&& extension,
                     const std::vector<size_t> &trace,
                     tsl::hopscotch_set<size_t> &prev_starts,
-                    const std::function<void(DBGAlignment&&)> &callback) const {
-    for (size_t i : trace) {
-        prev_starts.emplace(i);
-    }
-
+                    const std::function<void(DBGAlignment&&)> &callback) {
+    prev_starts.insert(trace.begin(), trace.end());
     callback(std::move(extension));
 }
 
@@ -411,8 +408,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
 
             auto get_extension = [&](Cigar cigar,
+                                     std::vector<size_t> trace,
                                      std::vector<NodeType> final_path,
-                                     std::string match) -> DBGAlignment {
+                                     std::string match) {
+                assert(trace.size() == final_path.size());
                 assert(final_path.size());
                 cigar.append(Cigar::CLIPPED, pos);
 
@@ -427,12 +426,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 );
                 assert(extension.is_valid(graph_, &config_));
 
-                extension.trim_offset();
+                trace.erase(trace.end() - extension.trim_offset(), trace.end());
                 extension.extend_query_begin(query_.data());
                 extension.extend_query_end(query_.data() + query_.size());
                 assert(extension.is_valid(graph_, &config_));
 
-                return extension;
+                return std::make_pair(extension, trace);
             };
 
             while (j) {
@@ -444,12 +443,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 align_offset = std::min(offset, graph_.get_k() - 1);
 
                 if (S[pos - trim] == 0) {
-                    process_extension(
-                        get_extension(ops, path, seq),
-                        trace, prev_starts, [&](DBGAlignment&& extension) {
-                            extensions.emplace_back(std::move(extension));
-                        }
-                    );
+                    auto [extension, trimmed_trace] = get_extension(ops, trace, path, seq);
+                    process_extension(std::move(extension), std::move(trimmed_trace),
+                                      prev_starts,
+                                      [&](DBGAlignment&& extension) {
+                        extensions.emplace_back(std::move(extension));
+                    });
                 }
 
                 if (pos == max_pos)
@@ -498,12 +497,13 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            process_extension(
-                get_extension(std::move(ops), std::move(path), std::move(seq)),
-                trace, prev_starts, [&](DBGAlignment&& extension) {
-                    extensions.emplace_back(std::move(extension));
-                }
-            );
+            auto [extension, trimmed_trace]
+                = get_extension(std::move(ops), std::move(trace),
+                                std::move(path), std::move(seq));
+            process_extension(std::move(extension), std::move(trimmed_trace),
+                              prev_starts, [&](DBGAlignment&& extension) {
+                extensions.emplace_back(std::move(extension));
+            });
         }
     }
 
