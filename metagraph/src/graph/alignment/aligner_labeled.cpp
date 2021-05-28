@@ -100,8 +100,6 @@ process_seq_path(const DeBruijnGraph &graph,
 
 template <typename NodeType>
 void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
-    std::vector<uint64_t> added_rows;
-    std::vector<node_index> added_nodes;
     min_scores_.clear();
 
     auto populate_min_scores = [&](const Vector<uint64_t> &targets) {
@@ -133,6 +131,20 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
         ++it;
     }
     assert(it == added_nodes.end());
+
+    added_rows.clear();
+    added_nodes.clear();
+}
+
+template <typename NodeType>
+void LabeledBacktrackingExtender<NodeType>
+::process_extension(DBGAlignment&& extension,
+                    const std::vector<size_t> &trace,
+                    tsl::hopscotch_set<size_t> &prev_starts,
+                    const std::function<void(DBGAlignment&&)> &callback) const {
+    DefaultColumnExtender<NodeType>::process_extension(
+        std::move(extension), trace, prev_starts, callback
+    );
 }
 
 template <typename NodeType>

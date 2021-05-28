@@ -115,6 +115,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     score_t xdrop_cutoff_;
     size_t start_;
+    size_t start;
 
     virtual void reset() override { table_.clear(); }
 
@@ -132,12 +133,16 @@ class DefaultColumnExtender : public IExtender<NodeType> {
               tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
               std::vector<DBGAlignment> &extensions) const;
 
-    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &extensions,
-                                      const AlignNode &node) const;
+    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &extensions) const;
 
     static std::pair<size_t, size_t> get_band(const AlignNode &prev,
                                               const Column &column_prev,
                                               score_t xdrop_cutoff);
+
+    virtual void process_extension(DBGAlignment&& extension,
+                                   const std::vector<size_t> &trace,
+                                   tsl::hopscotch_set<size_t> &prev_starts,
+                                   const std::function<void(DBGAlignment&&)> &callback) const;
 
     virtual void pop(const AlignNode &) {}
     virtual void init_backtrack() const {}

@@ -76,6 +76,19 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 }
 
 template <typename NodeType>
+void DefaultColumnExtender<NodeType>
+::process_extension(DBGAlignment&& extension,
+                    const std::vector<size_t> &trace,
+                    tsl::hopscotch_set<size_t> &prev_starts,
+                    const std::function<void(DBGAlignment&&)> &callback) const {
+    for (size_t i : trace) {
+        prev_starts.emplace(i);
+    }
+
+    callback(std::move(extension));
+}
+
+template <typename NodeType>
 auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         -> std::vector<DBGAlignment> {
     std::vector<DBGAlignment> extensions;
@@ -87,7 +100,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::string_view window(seed_->get_query().data(),
                             query_.data() + query_.size() - seed_->get_query().data());
 
-    size_t start = seed_->get_clipping();
+    start = seed_->get_clipping();
     const score_t *partial = partial_sums_.data() + start;
     assert(*partial == config_.match_score(window));
 
@@ -357,7 +370,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         }
 
         for (size_t i = 0; i < indices.size(); ++i) {
-            if (extensions.size() >= config_.num_alternative_paths)
+            if (skip_backtrack_start(extensions))
                 break;
 
             size_t j = indices[i];
@@ -365,6 +378,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 continue;
 
             std::vector<NodeType> path;
+            std::vector<size_t> trace;
             Cigar ops;
             std::string seq;
 
@@ -389,9 +403,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 score = S[pos - trim];
             }
 
-            auto add_extension = [&](Cigar cigar,
+            auto get_extension = [&](Cigar cigar,
                                      std::vector<NodeType> final_path,
-                                     std::string match) {
+                                     std::string match) -> DBGAlignment {
                 assert(final_path.size());
                 cigar.append(Cigar::CLIPPED, pos);
 
@@ -411,7 +425,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 extension.extend_query_end(query_.data() + query_.size());
                 assert(extension.is_valid(graph_, &config_));
 
-                extensions.emplace_back(std::move(extension));
+                return extension;
             };
 
             while (j) {
@@ -422,8 +436,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 Cigar::Operator last_op = OS[pos - trim];
                 align_offset = std::min(offset, graph_.get_k() - 1);
 
-                if (S[pos - trim] == 0)
-                    add_extension(ops, path, seq);
+                if (S[pos - trim] == 0) {
+                    process_extension(
+                        get_extension(ops, path, seq),
+                        trace, prev_starts, [&](DBGAlignment&& extension) {
+                            extensions.emplace_back(std::move(extension));
+                        }
+                    );
+                }
 
                 if (pos == max_pos)
                     prev_starts.emplace(j);
@@ -431,8 +451,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 switch (last_op) {
                     case Cigar::MATCH:
                     case Cigar::MISMATCH: {
-                        if (offset >= graph_.get_k() - 1)
+                        if (offset >= graph_.get_k() - 1) {
                             path.emplace_back(node);
+                            trace.emplace_back(j);
+                        }
 
                         ops.append(last_op);
                         seq += c;
@@ -453,8 +475,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
 
                             last_op = OF[pos - trim];
-                            if (offset >= graph_.get_k() - 1)
+                            if (offset >= graph_.get_k() - 1) {
                                 path.emplace_back(node);
+                                trace.emplace_back(j);
+                            }
 
                             seq += c;
                             ops.append(Cigar::DELETION);
@@ -467,7 +491,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
             }
 
-            add_extension(std::move(ops), std::move(path), std::move(seq));
+            process_extension(
+                get_extension(std::move(ops), std::move(path), std::move(seq)),
+                trace, prev_starts, [&](DBGAlignment&& extension) {
+                    extensions.emplace_back(std::move(extension));
+                }
+            );
         }
     }
 
@@ -476,8 +505,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
 template <typename NodeType>
 bool DefaultColumnExtender<NodeType>
-::skip_backtrack_start(const std::vector<DBGAlignment> &, const AlignNode &) const {
-    return true;
+::skip_backtrack_start(const std::vector<DBGAlignment> &extensions) const {
+    return extensions.size() >= config_.num_alternative_paths;
 }
 
 template <typename NodeType>

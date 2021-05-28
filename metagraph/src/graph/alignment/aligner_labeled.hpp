@@ -77,8 +77,12 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     virtual void init_backtrack() const override;
 
-    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &,
-                                      const AlignNode &) const override { return false; }
+    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &) const override { return false; }
+
+    virtual void process_extension(DBGAlignment&& extension,
+                                   const std::vector<size_t> &trace,
+                                   tsl::hopscotch_set<size_t> &prev_starts,
+                                   const std::function<void(DBGAlignment&&)> &callback) const override;
 
   private:
     const AnnotatedDBG &anno_graph_;
@@ -86,6 +90,9 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     mutable VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
     mutable tsl::hopscotch_map<node_index, size_t> targets_;
     mutable tsl::hopscotch_map<uint64_t, score_t> min_scores_;
+
+    mutable std::vector<uint64_t> added_rows;
+    mutable std::vector<node_index> added_nodes;
 };
 
 template <class Seeder = ExactSeeder<>,
