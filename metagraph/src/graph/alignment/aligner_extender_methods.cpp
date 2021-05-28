@@ -358,20 +358,22 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     if (table.size()) {
         init_backtrack();
-        std::vector<size_t> indices;
         tsl::hopscotch_set<size_t> prev_starts;
-        if (config_.num_alternative_paths == 1) {
-            indices.push_back(std::get<1>(best_score));
-        } else {
-            indices.resize(table.size());
-            std::iota(indices.begin(), indices.end(), 0);
-            std::sort(indices.begin(), indices.end(), [this](size_t i, size_t j) {
-                const auto &a = table[i];
-                const auto &b = table[j];
-                return std::get<0>(a)[std::get<10>(a) - std::get<11>(a)]
-                    > std::get<0>(b)[std::get<10>(b) - std::get<11>(b)];
-            });
+
+        std::vector<size_t> indices;
+        indices.reserve(table.size());
+        for (size_t i = 0; i < table.size(); ++i) {
+            const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[i];
+            if (OS[max_pos - trim] == Cigar::MATCH)
+                indices.emplace_back(i);
         }
+
+        std::sort(indices.begin(), indices.end(), [this](size_t i, size_t j) {
+            const auto &a = table[i];
+            const auto &b = table[j];
+            return std::get<0>(a)[std::get<10>(a) - std::get<11>(a)]
+                > std::get<0>(b)[std::get<10>(b) - std::get<11>(b)];
+        });
 
         for (size_t i = 0; i < indices.size(); ++i) {
             if (skip_backtrack_start(extensions))

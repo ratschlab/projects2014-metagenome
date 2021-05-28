@@ -192,7 +192,16 @@ void LabeledBacktrackingExtender<NodeType>
     prev_starts.emplace(*it);
     ++it;
 
-    auto aln_from_suffix = [&]() {
+    auto is_valid = [&]() -> bool {
+        return suffix.get_front_op() == Cigar::MATCH
+            && suffix.get_score() >= this->config_.min_cell_score
+            && target_intersection.size();
+    };
+
+    auto aln_from_suffix = [&]() -> bool {
+        if (!is_valid())
+            return false;
+
         DBGAlignment aln_suffix(suffix);
         aln_suffix.target_columns = target_intersection;
         assert(check_targets(anno_graph_, aln_suffix));
@@ -210,9 +219,16 @@ void LabeledBacktrackingExtender<NodeType>
         );
         aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
 
-        if (aln_suffix.target_columns.size())
+        if (aln_suffix.target_columns.size()) {
             callback(std::move(aln_suffix));
+            return true;
+        }
+
+        return false;
     };
+
+    AlignmentSuffix<node_index> last_valid(suffix);
+    Vector<uint64_t> last_valid_target_intersection;
 
     for (size_t i = alignment.size() - 1; i > 0; --i) {
         const auto &cur_targets = *(targets_set_.begin() + targets_[alignment[i - 1]]);
@@ -241,31 +257,27 @@ void LabeledBacktrackingExtender<NodeType>
         }
         ++it;
 
-        if (inter.size() < target_intersection.size()) {
-            if (suffix.get_front_op() != Cigar::DELETION
-                    && suffix.get_score() >= this->config_.min_cell_score) {
+        if (is_valid()) {
+            last_valid = suffix;
+            last_valid_target_intersection = target_intersection;
+            if (inter.size() < target_intersection.size())
                 aln_from_suffix();
-            }
-        } else {
-            --suffix;
-            if (!suffix.reof() && suffix.get_front_op() == Cigar::DELETION) {
-                ++suffix;
-                if (suffix.get_front_op() != Cigar::DELETION
-                        && suffix.get_score() >= this->config_.min_cell_score) {
-                    aln_from_suffix();
-                }
-            } else {
-                ++suffix;
-            }
+
+        } else if (inter.size() < target_intersection.size()) {
+            std::swap(target_intersection, last_valid_target_intersection);
+            std::swap(suffix, last_valid);
+            aln_from_suffix();
+            std::swap(target_intersection, last_valid_target_intersection);
+            std::swap(suffix, last_valid);
         }
 
         suffix_shift();
         std::swap(target_intersection, inter);
     }
 
-    if (target_intersection.size()
-            && suffix.get_score() >= this->config_.min_cell_score
-            && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
+    if (!aln_from_suffix()) {
+        std::swap(target_intersection, last_valid_target_intersection);
+        std::swap(suffix, last_valid);
         aln_from_suffix();
     }
 }
