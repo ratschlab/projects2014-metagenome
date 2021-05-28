@@ -1279,11 +1279,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                 if (discovery_fraction == 0.0) {
                     ASSERT_EQ(2ull, paths.size());
                     EXPECT_EQ(557llu, paths[0].get_score()) << xdrop << "\n" << paths[0];
-                    if (nodes_per_seq_char == 10.0) {
-                        EXPECT_EQ(556llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
-                    } else {
-                        EXPECT_EQ(557llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
-                    }
+                    EXPECT_EQ(556llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
                     EXPECT_NE(paths[0], paths[1]);
                 } else {
                     EXPECT_EQ(0ull, paths.size());

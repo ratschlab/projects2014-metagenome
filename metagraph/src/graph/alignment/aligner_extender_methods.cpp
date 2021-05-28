@@ -89,6 +89,28 @@ void DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
+bool DefaultColumnExtender<NodeType>::update_seed_filter(size_t i) {
+    const auto &[S, E, F, OS, OE, OF, next, i_prev, c, offset, max_pos, begin] = table[i];
+    auto it = conv_checker.find(next);
+    if (it == conv_checker.end()) {
+        ScoreVec &s_merged = conv_checker.emplace(next, ScoreVec(query_.size() + 1, ninf)).first.value();
+        std::copy(S.begin(), S.end(), s_merged.begin() + start + begin);
+        return true;
+    } else {
+        ScoreVec &s_merged = it.value();
+        bool converged = true;
+        for (size_t j = begin; j < S.size() + begin; ++j) {
+            if (S[j - begin] > s_merged[start + j]) {
+                converged = false;
+                s_merged[j + start] = S[j - begin];
+            }
+        }
+
+        return !converged;
+    }
+}
+
+template <typename NodeType>
 auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         -> std::vector<DBGAlignment> {
     std::vector<DBGAlignment> extensions;
@@ -325,26 +347,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 if (S[max_pos - trim] > std::get<0>(best_score)) {
                     best_score = next_score;
+                    update_seed_filter(table.size() - 1);
                     queue.emplace(next_score);
-                } else {
-                    auto it = conv_checker.find(next);
-                    if (it == conv_checker.end()) {
-                        ScoreVec &s_merged = conv_checker.emplace(next, ScoreVec(query_.size() + 1, ninf)).first.value();
-                        std::copy(S.begin(), S.end(), s_merged.begin() + start + begin);
-                        queue.emplace(next_score);
-                    } else {
-                        ScoreVec &s_merged = it.value();
-                        bool converged = true;
-                        for (size_t j = begin; j < end; ++j) {
-                            if (S[j - trim] > s_merged[start + j]) {
-                                converged = false;
-                                s_merged[j + start] = S[j - trim];
-                            }
-                        }
-
-                        if (!converged)
-                            queue.emplace(next_score);
-                    }
+                } else if (update_seed_filter(table.size() - 1)) {
+                    queue.emplace(next_score);
                 }
 
             } else {

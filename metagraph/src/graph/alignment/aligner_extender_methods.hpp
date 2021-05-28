@@ -144,6 +144,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                                    tsl::hopscotch_set<size_t> &prev_starts,
                                    const std::function<void(DBGAlignment&&)> &callback) const;
 
+    virtual bool update_seed_filter(size_t j);
+
     virtual void pop(const AlignNode &) {}
     virtual void init_backtrack() const {}
 
