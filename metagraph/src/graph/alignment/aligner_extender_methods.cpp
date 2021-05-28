@@ -117,8 +117,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             query_.data() + query_.size() - seed_->get_query().data());
 
     start = seed_->get_clipping();
-    const score_t *partial = partial_sums_.data() + start;
-    assert(*partial == config_.match_score(window));
 
     table.emplace_back(ScoreVec(window.size() + 1, 0),
                        ScoreVec(window.size() + 1, ninf),
@@ -150,6 +148,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::priority_queue<Ref, std::vector<Ref>, RefCmp> queue;
     queue.emplace(best_score);
 
+    assert(partial_sums_.at(start) == config_.match_score(window));
+
     while (queue.size()) {
         size_t i = std::get<1>(queue.top());
         queue.pop();
@@ -175,13 +175,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (end != window.size() + 1)
                 ++end;
 
-            if (end == begin)
+            if (end <= begin)
                 continue;
 
             bool has_extension = false;
-            for (size_t j = begin; j < end; ++j) {
-                assert(partial[j] == config_.match_score(window.substr(j)));
-                score_t ext_score = S[j - trim] + partial[j];
+            size_t loop_end = std::min(end, S.size() + trim);
+            for (size_t j = begin; j < loop_end; ++j) {
+                assert(partial_sums_.at(start + j) == config_.match_score(window.substr(j)));
+                score_t ext_score = S[j - trim] + partial_sums_.at(start + j);
                 if ((config_.num_alternative_paths == 1 && ext_score > std::get<0>(best_score))
                         || ext_score >= min_path_score) {
                     has_extension = true;
