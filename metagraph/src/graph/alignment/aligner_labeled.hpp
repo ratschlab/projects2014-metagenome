@@ -34,6 +34,7 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                     [](const auto &a) { return a.target_columns.empty(); }
                 );
                 alignments.erase(it, alignments.end());
+
                 callback(header, std::move(alignments));
             }
         );
@@ -68,14 +69,16 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     virtual ~LabeledBacktrackingExtender() {}
 
+    virtual void initialize(const DBGAlignment &seed) override;
+
   protected:
     virtual std::vector<AlignNode>
     backtrack(score_t min_path_score,
               AlignNode best_node,
               tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-              std::vector<DBGAlignment> &extensions) const override;
+              std::vector<DBGAlignment> &extensions) override;
 
-    virtual void init_backtrack() const override;
+    virtual void init_backtrack() override;
 
     virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &) const override { return false; }
 
@@ -84,15 +87,19 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
                                    tsl::hopscotch_set<size_t> &prev_starts,
                                    const std::function<void(DBGAlignment&&)> &callback) const override;
 
+    virtual bool update_seed_filter(size_t j) override;
+
+    void populate_min_scores(const Vector<uint64_t> &targets);
+
   private:
     const AnnotatedDBG &anno_graph_;
     const IAlignmentAggregator<NodeType> &aggregator_;
-    mutable VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
-    mutable tsl::hopscotch_map<node_index, size_t> targets_;
-    mutable tsl::hopscotch_map<uint64_t, score_t> min_scores_;
+    VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
+    tsl::hopscotch_map<node_index, size_t> targets_;
+    tsl::hopscotch_map<uint64_t, score_t> min_scores_;
 
-    mutable std::vector<uint64_t> added_rows;
-    mutable std::vector<node_index> added_nodes;
+    std::vector<uint64_t> added_rows;
+    std::vector<node_index> added_nodes;
 };
 
 template <class Seeder = ExactSeeder<>,
@@ -102,7 +109,13 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
     template <typename... Args>
     LabeledAligner(Args&&... args)
-          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
+          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {
+        if (!this->config_.min_seed_length)
+            this->config_.min_seed_length = this->graph_.get_k();
+
+        if (!this->config_.max_seed_length)
+            this->config_.max_seed_length = this->graph_.get_k();
+    }
 
   protected:
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
@@ -115,6 +128,9 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
                  std::vector<DeBruijnGraph::node_index>&& nodes) const override {
+        assert(this->config_.min_seed_length);
+        assert(this->config_.max_seed_length >= this->config_.min_seed_length);
+
         if (this->config_.min_seed_length < this->graph_.get_k()
                 && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
             return std::make_shared<SuffixSeeder<Seeder>>(

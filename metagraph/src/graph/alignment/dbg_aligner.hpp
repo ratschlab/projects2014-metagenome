@@ -99,6 +99,9 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
                  std::vector<DeBruijnGraph::node_index>&& nodes) const override {
+        assert(this->config_.min_seed_length);
+        assert(this->config_.max_seed_length >= this->config_.min_seed_length);
+
         if (config_.min_seed_length < graph_.get_k()
                 && SuffixSeeder<Seeder>::get_base_dbg_succ(graph_)) {
             return std::make_shared<SuffixSeeder<Seeder>>(

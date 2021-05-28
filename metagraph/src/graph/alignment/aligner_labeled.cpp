@@ -99,29 +99,45 @@ process_seq_path(const DeBruijnGraph &graph,
 }
 
 template <typename NodeType>
-void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
+void LabeledBacktrackingExtender<NodeType>::initialize(const DBGAlignment &seed) {
+    DefaultColumnExtender<NodeType>::initialize(seed);
     min_scores_.clear();
+}
 
-    auto populate_min_scores = [&](const Vector<uint64_t> &targets) {
-        for (uint64_t target : targets) {
-            if (!min_scores_.count(target))
-                min_scores_.emplace(target, aggregator_.get_min_path_score(target));
-        }
-    };
-
-    DefaultColumnExtender<NodeType>::call_visited_nodes([&](node_index node, size_t, size_t) {
-        auto [it, inserted] = targets_.emplace(node, 0);
-        if (inserted) {
-            process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
-                             { node }, [&](auto row, size_t) {
-                added_rows.push_back(row);
-                added_nodes.push_back(node);
-            });
+template <typename NodeType>
+void LabeledBacktrackingExtender<NodeType>
+::populate_min_scores(const Vector<uint64_t> &targets) {
+    for (uint64_t target : targets) {
+        score_t score = aggregator_.get_min_path_score(target);
+        if (!min_scores_.count(target)) {
+            min_scores_.emplace(target, score);
         } else {
-            populate_min_scores(*(targets_set_.begin() + it->second));
+            min_scores_[target] = std::max(min_scores_[target], score);
         }
-    });
+    }
+}
 
+template <typename NodeType>
+bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(size_t j) {
+    bool result = DefaultColumnExtender<NodeType>::update_seed_filter(j);
+
+    const auto &[S, E, F, OS, OE, OF, next, i_prev, c, offset, max_pos, begin] = this->table[j];
+    auto [it, inserted] = targets_.emplace(next, 0);
+    if (inserted) {
+        process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
+                         { next }, [&](auto row, size_t) {
+            added_rows.push_back(row);
+            added_nodes.push_back(next);
+        });
+    } else {
+        populate_min_scores(*(targets_set_.begin() + it->second));
+    }
+
+    return result;
+}
+
+template <typename NodeType>
+void LabeledBacktrackingExtender<NodeType>::init_backtrack() {
     auto it = added_nodes.begin();
     for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
         assert(it != added_nodes.end());
@@ -152,7 +168,7 @@ auto LabeledBacktrackingExtender<NodeType>
 ::backtrack(score_t min_path_score,
             AlignNode best_node,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-            std::vector<DBGAlignment> &extensions) const -> std::vector<AlignNode> {
+            std::vector<DBGAlignment> &extensions) -> std::vector<AlignNode> {
     size_t target_id = targets_[std::get<0>(best_node)];
     if (!target_id)
         return {};

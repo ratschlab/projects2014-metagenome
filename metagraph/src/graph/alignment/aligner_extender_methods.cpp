@@ -360,6 +360,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     }
 
     if (table.size()) {
+        init_backtrack();
         std::vector<size_t> indices;
         tsl::hopscotch_set<size_t> prev_starts;
         if (config_.num_alternative_paths == 1) {
@@ -519,7 +520,7 @@ template <typename NodeType>
 auto DefaultColumnExtender<NodeType>
 ::backtrack(score_t, AlignNode,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &,
-            std::vector<DBGAlignment> &) const -> std::vector<AlignNode> {
+            std::vector<DBGAlignment> &) -> std::vector<AlignNode> {
     return {};
 }
 

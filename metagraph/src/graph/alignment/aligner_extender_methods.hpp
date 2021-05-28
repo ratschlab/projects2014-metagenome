@@ -131,7 +131,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     backtrack(score_t min_path_score,
               AlignNode best_node,
               tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-              std::vector<DBGAlignment> &extensions) const;
+              std::vector<DBGAlignment> &extensions);
 
     virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &extensions) const;
 
@@ -147,7 +147,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual bool update_seed_filter(size_t j);
 
     virtual void pop(const AlignNode &) {}
-    virtual void init_backtrack() const {}
+    virtual void init_backtrack() {}
 
   private:
     // compute perfect match scores for all suffixes
