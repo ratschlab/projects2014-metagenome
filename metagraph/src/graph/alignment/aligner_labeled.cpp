@@ -198,12 +198,12 @@ void LabeledBacktrackingExtender<NodeType>
             && target_intersection.size();
     };
 
-    auto aln_from_suffix = [&]() -> bool {
-        if (!is_valid())
-            return false;
+    AlignmentSuffix<node_index> last_valid(suffix);
+    Vector<uint64_t> last_valid_target_intersection;
 
-        DBGAlignment aln_suffix(suffix);
-        aln_suffix.target_columns = target_intersection;
+    auto aln_from_suffix = [&]() -> bool {
+        DBGAlignment aln_suffix(last_valid);
+        aln_suffix.target_columns = last_valid_target_intersection;
         assert(check_targets(anno_graph_, aln_suffix));
         auto target_it = std::remove_if(
             aln_suffix.target_columns.begin(),
@@ -226,9 +226,6 @@ void LabeledBacktrackingExtender<NodeType>
 
         return false;
     };
-
-    AlignmentSuffix<node_index> last_valid(suffix);
-    Vector<uint64_t> last_valid_target_intersection;
 
     for (size_t i = alignment.size() - 1; i > 0; --i) {
         const auto &cur_targets = *(targets_set_.begin() + targets_[alignment[i - 1]]);
@@ -260,26 +257,21 @@ void LabeledBacktrackingExtender<NodeType>
         if (is_valid()) {
             last_valid = suffix;
             last_valid_target_intersection = target_intersection;
-            if (inter.size() < target_intersection.size())
-                aln_from_suffix();
-
-        } else if (inter.size() < target_intersection.size()) {
-            std::swap(target_intersection, last_valid_target_intersection);
-            std::swap(suffix, last_valid);
-            aln_from_suffix();
-            std::swap(target_intersection, last_valid_target_intersection);
-            std::swap(suffix, last_valid);
         }
+
+        if (inter.size() < target_intersection.size())
+            aln_from_suffix();
 
         suffix_shift();
         std::swap(target_intersection, inter);
     }
 
-    if (!aln_from_suffix()) {
-        std::swap(target_intersection, last_valid_target_intersection);
-        std::swap(suffix, last_valid);
-        aln_from_suffix();
+    if (is_valid()) {
+        std::swap(last_valid, suffix);
+        std::swap(last_valid_target_intersection, target_intersection);
     }
+
+    aln_from_suffix();
 }
 
 template <typename NodeType>
