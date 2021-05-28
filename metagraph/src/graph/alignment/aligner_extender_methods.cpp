@@ -339,13 +339,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 if (S[max_pos - trim] - xdrop_cutoff > config_.xdrop)
                     xdrop_cutoff = S[max_pos - trim] - config_.xdrop;
 
-                if (S[max_pos - trim] > std::get<0>(best_score)) {
+                if (S[max_pos - trim] > std::get<0>(best_score))
                     best_score = next_score;
-                    update_seed_filter(table.size() - 1);
+
+                if (update_seed_filter(table.size() - 1))
                     queue.emplace(next_score);
-                } else if (update_seed_filter(table.size() - 1)) {
-                    queue.emplace(next_score);
-                }
 
             } else {
                 table.pop_back();
