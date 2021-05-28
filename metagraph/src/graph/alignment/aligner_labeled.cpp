@@ -274,15 +274,6 @@ void LabeledBacktrackingExtender<NodeType>
     aln_from_suffix();
 }
 
-template <typename NodeType>
-auto LabeledBacktrackingExtender<NodeType>
-::backtrack(score_t,
-            AlignNode,
-            tsl::hopscotch_set<AlignNode, AlignNodeHash> &,
-            std::vector<DBGAlignment> &) -> std::vector<AlignNode> {
-    return {};
-}
-
 template class LabeledBacktrackingExtender<>;
 
 } // namespace align

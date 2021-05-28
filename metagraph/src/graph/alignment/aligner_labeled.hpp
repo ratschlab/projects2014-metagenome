@@ -17,6 +17,12 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : anno_graph_(anno_graph), graph_(anno_graph_.get_graph()), config_(config) {
+        if (!this->config_.min_seed_length)
+            this->config_.min_seed_length = this->graph_.get_k();
+
+        if (!this->config_.max_seed_length)
+            this->config_.max_seed_length = this->graph_.get_k();
+
         assert(config_.num_alternative_paths);
         if (!config_.check_config_scores()) {
             throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
@@ -55,8 +61,6 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     typedef DefaultColumnExtender<DeBruijnGraph::node_index> BaseExtender;
     typedef typename BaseExtender::score_t score_t;
     typedef typename BaseExtender::node_index node_index;
-    typedef typename BaseExtender::AlignNode AlignNode;
-    typedef typename BaseExtender::AlignNodeHash AlignNodeHash;
     typedef typename BaseExtender::DBGAlignment DBGAlignment;
 
     LabeledBacktrackingExtender(const AnnotatedDBG &anno_graph,
@@ -72,12 +76,6 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual void initialize(const DBGAlignment &seed) override;
 
   protected:
-    virtual std::vector<AlignNode>
-    backtrack(score_t min_path_score,
-              AlignNode best_node,
-              tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-              std::vector<DBGAlignment> &extensions) override;
-
     virtual void init_backtrack() override;
 
     virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &) const override { return false; }
@@ -109,13 +107,7 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
     template <typename... Args>
     LabeledAligner(Args&&... args)
-          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {
-        if (!this->config_.min_seed_length)
-            this->config_.min_seed_length = this->graph_.get_k();
-
-        if (!this->config_.max_seed_length)
-            this->config_.max_seed_length = this->graph_.get_k();
-    }
+          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
 
   protected:
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>

@@ -19,8 +19,7 @@ template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
                                                        const DBGAlignerConfig &config,
                                                        std::string_view query)
-      : graph_(graph), config_(config), query_(query),
-        start_node_(graph_.max_index() + 1, '$', 0, 0) {
+      : graph_(graph), config_(config), query_(query) {
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -66,8 +65,6 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 
     if (it == conv_checker.end()) {
         seed_ = &seed;
-        reset();
-        xdrop_cutoff_ = ninf;
         table.clear();
     } else {
         DEBUG_LOG("Skipping seed: {}", seed);
@@ -517,36 +514,6 @@ bool DefaultColumnExtender<NodeType>
 ::skip_backtrack_start(const std::vector<DBGAlignment> &extensions) const {
     return extensions.size() >= config_.num_alternative_paths;
 }
-
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::backtrack(score_t, AlignNode,
-            tsl::hopscotch_set<AlignNode, AlignNodeHash> &,
-            std::vector<DBGAlignment> &) -> std::vector<AlignNode> {
-    return {};
-}
-
-template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &) const {
-    return;
-}
-
-template <typename NodeType>
-bool DefaultColumnExtender<NodeType>::has_converged(const Column &, const Scores &) {
-    return true;
-}
-
-template <typename NodeType>
-void DefaultColumnExtender<NodeType>::sanitize(Scores &, score_t) {}
-
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>::get_outgoing(const AlignNode &) const
-        -> std::vector<AlignNode> { return {}; }
-
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::get_band(const AlignNode &, const Column &, score_t) -> std::pair<size_t, size_t> { return {}; }
 
 template class DefaultColumnExtender<>;
 
