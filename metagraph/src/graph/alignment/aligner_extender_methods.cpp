@@ -438,7 +438,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
 
                 Cigar::Operator last_op = OS[pos - trim];
-                align_offset = std::min(offset, graph_.get_k() - 1);
 
                 if (S[pos - trim] == 0) {
                     auto [extension, trimmed_trace] = get_extension(ops, trace, path, seq);
@@ -448,6 +447,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                         extensions.emplace_back(std::move(extension));
                     });
                 }
+
+                align_offset = std::min(offset, graph_.get_k() - 1);
 
                 if (pos == max_pos)
                     prev_starts.emplace(j);
