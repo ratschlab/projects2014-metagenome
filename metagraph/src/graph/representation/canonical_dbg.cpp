@@ -197,8 +197,20 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
                 c = kmer::KmerExtractorBOSS::complement(c);
 
-                if (children[c] == npos)
+                if (children[c] != npos) {
+                    if (k_odd_) {
+                        common::logger->error(
+                            "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                            node, graph_.get_node_sequence(node),
+                            children[c], graph_.get_node_sequence(children[c]),
+                            next, graph_.get_node_sequence(next));
+                    } else {
+                        is_palindrome_cache_.Put(next, true);
+                    }
+
+                } else {
                     children[c] = next + offset_;
+                }
             },
             get_k() - 1
         );
@@ -302,8 +314,20 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
                     c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[c] == npos)
+                    if (parents[c] != npos) {
+                        if (k_odd_) {
+                            common::logger->error(
+                                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                                node, graph_.get_node_sequence(node),
+                                parents[c], graph_.get_node_sequence(parents[c]),
+                                prev, graph_.get_node_sequence(prev));
+                        } else {
+                            is_palindrome_cache_.Put(prev, true);
+                        }
+
+                    } else {
                         parents[c] = prev + offset_;
+                    }
                 }
             });
         }
