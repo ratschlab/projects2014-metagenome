@@ -276,7 +276,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (loop_begin > begin)
                 update_match(begin);
 
-            #pragma omp simd
+            // TODO: SIMD?
             for (size_t j = loop_begin; j < loop_end; ++j) {
                 update_match(j);
                 update_del(j);
@@ -288,7 +288,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             // update insertion scores
             // since each element is dependent on the previous one, this can't
             // be vectorized easily
-            #pragma omp simd
             for (size_t j = begin + 1; j < end; ++j) {
                 score_t ins_open = S[j - 1 - begin] + config_.gap_opening_penalty;
                 score_t ins_extend = E[j - 1 - begin] + config_.gap_extension_penalty;
@@ -323,7 +322,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
 
             if (offset + 1 >= begin && offset + 1 < end) {
-                #pragma omp simd
+                // TODO: SIMD?
                 for (size_t j = begin; j < end; ++j) {
                     if (std::make_pair(S[j - trim], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(offset + 1)))
                             > std::make_pair(S[max_pos - trim], std::abs(static_cast<ssize_t>(j) - static_cast<ssize_t>(offset + 1)))) {

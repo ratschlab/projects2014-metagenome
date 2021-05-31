@@ -125,7 +125,7 @@ bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(size_t j) {
     auto [it, inserted] = targets_.emplace(next, 0);
     if (inserted) {
         process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
-                         { next }, [&](auto row, size_t) {
+                         { next }, [this,next](auto row, size_t) {
             added_rows.push_back(row);
             added_nodes.push_back(next);
         });
