@@ -121,7 +121,7 @@ template <typename NodeType>
 bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(size_t j) {
     bool result = DefaultColumnExtender<NodeType>::update_seed_filter(j);
 
-    const auto &[S, E, F, OS, OE, OF, next, i_prev, c, offset, max_pos, begin] = this->table[j];
+    NodeType next = std::get<6>(this->table[j]);
     auto [it, inserted] = targets_.emplace(next, 0);
     if (inserted) {
         process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
