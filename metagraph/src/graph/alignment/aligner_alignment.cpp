@@ -7,6 +7,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 
 namespace mtg {
@@ -141,17 +142,27 @@ size_t Alignment<NodeType>::trim_offset() {
 template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                                              std::string_view query_rev_comp) {
-    assert(graph.get_mode() == DeBruijnGraph::CANONICAL);
-
-    if (empty())
-        return;
-
     assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
-    assert(is_valid(graph));
 
     trim_offset();
-    assert(is_valid(graph));
     assert(!offset_ || nodes_.size() == 1);
+
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(&graph)) {
+        if (offset_) {
+            *this = Alignment<NodeType>();
+        } else {
+            std::reverse(cigar_.begin(), cigar_.end());
+            std::reverse(nodes_.begin(), nodes_.end());
+            ::reverse_complement(sequence_.begin(), sequence_.end());
+            assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
+
+            orientation_ = !orientation_;
+            query_ = { query_rev_comp.data() + get_clipping(),
+                       query_rev_comp.size() - get_clipping() - get_end_clipping() };
+            assert(is_valid(graph));
+        }
+        return;
+    }
 
     if (!offset_) {
         reverse_complement_seq_path(graph, sequence_, nodes_);

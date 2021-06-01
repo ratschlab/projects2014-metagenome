@@ -1481,6 +1481,29 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_both_directions2) {
+    size_t k = 11;
+    std::string reference =    "GTAGTGCTAGCTGTAGTCGTGCTGATGC";
+    std::string query =        "GTAGTGCTACCTGTAGTCGTGGTGATGC";
+    //                                   X           X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.forward_and_reverse_complement = true;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+
+    EXPECT_EQ(18u, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
     size_t k = 6;
     std::vector<std::string> seqs;

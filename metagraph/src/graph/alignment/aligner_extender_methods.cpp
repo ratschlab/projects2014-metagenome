@@ -19,7 +19,7 @@ template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
                                                        const DBGAlignerConfig &config,
                                                        std::string_view query)
-      : graph_(graph), config_(config), query_(query) {
+      : graph_(&graph), config_(config), query_(query) {
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -32,7 +32,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     assert(config_.get_row(query_.back())[query_.back()] == partial_sums_.back());
     partial_sums_.push_back(0);
 
-    for (char c : graph_.alphabet()) {
+    for (char c : graph_->alphabet()) {
         auto &p_score_row = profile_score_.emplace(c, query_.size() + 9).first.value();
         auto &p_op_row = profile_op_.emplace(c, query_.size() + 9).first.value();
 
@@ -55,7 +55,7 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     assert(seed.get_cigar().size());
     assert(seed.get_cigar().back().first == Cigar::MATCH
         || seed.get_cigar().back().first == Cigar::MISMATCH);
-    assert(seed.is_valid(graph_, &config_));
+    assert(seed.is_valid(*graph_, &config_));
 
     auto it = conv_checker.find(seed.back());
 
@@ -194,15 +194,15 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 continue;
 
             if (next_offset - seed_->get_offset() < seed_->get_sequence().size()) {
-                if (next_offset < graph_.get_k()) {
+                if (next_offset < graph_->get_k()) {
                     outgoing.emplace_back(seed_->front(), seed_->get_sequence()[next_offset - seed_->get_offset()]);
                 } else {
-                    outgoing.emplace_back((*seed_)[next_offset - graph_.get_k() + 1],
+                    outgoing.emplace_back((*seed_)[next_offset - graph_->get_k() + 1],
                                           seed_->get_sequence()[next_offset - seed_->get_offset()]);
-                    assert(graph_.traverse(node, outgoing.back().second) == outgoing.back().first);
+                    assert(graph_->traverse(node, outgoing.back().second) == outgoing.back().first);
                 }
             } else {
-                graph_.call_outgoing_kmers(node, [&](NodeType next, char c) {
+                graph_->call_outgoing_kmers(node, [&](NodeType next, char c) {
                     if (c != boss::BOSS::kSentinel)
                         outgoing.emplace_back(next, c);
                 });
@@ -232,7 +232,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(node_cur == next);
             assert(c_stored == c);
             assert(offset == offset_prev + 1);
-            assert(c == graph_.get_node_sequence(node_cur)[std::min(graph_.get_k() - 1, offset)]);
+            assert(c == graph_->get_node_sequence(node_cur)[std::min(graph_->get_k() - 1, offset)]);
 
             const int8_t *profile_scores = profile_score_[c].data() + start;
             const Cigar::Operator *profile_ops = profile_op_[c].data() + start;
@@ -393,7 +393,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 if (S[max_pos - trim] < min_path_score)
                     break;
 
-                if (offset < graph_.get_k() - 1)
+                if (offset < graph_->get_k() - 1)
                     continue;
 
                 if (OS[max_pos - trim] != Cigar::MATCH)
@@ -421,12 +421,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     std::move(final_path), std::move(match), score, std::move(cigar),
                     0, seed_->get_orientation(), align_offset
                 );
-                assert(extension.is_valid(graph_, &config_));
+                assert(extension.is_valid(*graph_, &config_));
 
                 trace.erase(trace.end() - extension.trim_offset(), trace.end());
                 extension.extend_query_begin(query_.data());
                 extension.extend_query_end(query_.data() + query_.size());
-                assert(extension.is_valid(graph_, &config_));
+                assert(extension.is_valid(*graph_, &config_));
 
                 return std::make_pair(extension, trace);
             };
@@ -434,7 +434,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             while (j) {
                 assert(j != static_cast<size_t>(-1));
                 const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
-                assert(c == graph_.get_node_sequence(node)[std::min(graph_.get_k() - 1, offset)]);
+                assert(c == graph_->get_node_sequence(node)[std::min(graph_->get_k() - 1, offset)]);
 
                 Cigar::Operator last_op = OS[pos - trim];
 
@@ -447,7 +447,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     });
                 }
 
-                align_offset = std::min(offset, graph_.get_k() - 1);
+                align_offset = std::min(offset, graph_->get_k() - 1);
 
                 if (pos == max_pos)
                     prev_starts.emplace(j);
@@ -455,7 +455,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 switch (last_op) {
                     case Cigar::MATCH:
                     case Cigar::MISMATCH: {
-                        if (offset >= graph_.get_k() - 1) {
+                        if (offset >= graph_->get_k() - 1) {
                             path.emplace_back(node);
                             trace.emplace_back(j);
                         }
@@ -479,7 +479,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                             const auto &[S, E, F, OS, OE, OF, node, j_prev, c, offset, max_pos, trim] = table[j];
 
                             last_op = OF[pos - trim];
-                            if (offset >= graph_.get_k() - 1) {
+                            if (offset >= graph_->get_k() - 1) {
                                 path.emplace_back(node);
                                 trace.emplace_back(j);
                             }

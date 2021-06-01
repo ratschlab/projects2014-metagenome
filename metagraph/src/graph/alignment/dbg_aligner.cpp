@@ -1,6 +1,7 @@
 #include "dbg_aligner.hpp"
 
 #include "common/algorithms.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 namespace mtg {
 namespace graph {
@@ -29,7 +30,7 @@ class SeedAndExtendAlignerCore {
                              const DBGAlignerConfig &config,
                              std::shared_ptr<SeedFilter> seed_filter,
                              Args&&... args)
-          : graph_(graph), config_(config),
+          : graph_(graph), config_(config), rc_dbg_(graph_),
             seed_filter_(seed_filter),
             paths_(std::forward<Args>(args)...),
             aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
@@ -51,13 +52,6 @@ class SeedAndExtendAlignerCore {
     void align_one_direction(bool orientation_to_align,
                              const ISeeder<node_index> &seeder,
                              IExtender<node_index> &extender);
-
-    // Align both the forward and reverse complement of the query sequence,
-    // then report the best scoring alignment.
-    void align_best_direction(const ISeeder<node_index> &seeder,
-                              const ISeeder<node_index> &seeder_rc,
-                              IExtender<node_index> &extender,
-                              IExtender<node_index> &extender_rc);
 
     // Align the forward and reverse complement of the query sequence in both
     // directions and return the overall best alignment. e.g., for the forward query
@@ -89,6 +83,7 @@ class SeedAndExtendAlignerCore {
 
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+    RCDBG rc_dbg_;
 
     std::shared_ptr<SeedFilter> seed_filter_;
     DBGQueryAlignment paths_;
@@ -162,7 +157,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         auto extender = build_extender(this_query, aligner_core.get_aggregator());
 
-        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL
+                || get_config().forward_and_reverse_complement) {
             auto extender_rc = build_extender(reverse, aligner_core.get_aggregator());
 
             auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
@@ -176,10 +172,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
             aligner_core.align_both_directions(*seeder, *seeder_rc,
                                                *extender, *extender_rc,
                                                build_rev_comp_alignment_core);
-
-        } else if (get_config().forward_and_reverse_complement) {
-            auto extender_rc = build_extender(reverse, aligner_core.get_aggregator());
-            aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
 
         } else {
             aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
@@ -212,14 +204,12 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
         if (extensions.empty() && seed.get_score() >= min_path_score) {
             seed.extend_query_end(query.data() + query.size());
             seed.trim_offset();
-            assert(seed.is_valid(graph_, &config_));
             DEBUG_LOG("Alignment (seed): {}", seed);
             callback(std::move(seed));
         }
 
         for (auto&& extension : extensions) {
-            assert(extension.is_valid(graph_, &config_));
-            DEBUG_LOG("Alignment (extension): {}", seed);
+            DEBUG_LOG("Alignment (extension): {}", extension);
             callback(std::move(extension));
         }
     }
@@ -239,21 +229,6 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_best_direction(const ISeeder<node_index> &seeder,
-                       const ISeeder<node_index> &seeder_rc,
-                       IExtender<node_index> &extender,
-                       IExtender<node_index> &extender_rc) {
-    std::string_view forward = paths_.get_query();
-    std::string_view reverse = paths_.get_query(true);
-
-    align_aggregate([&](const auto &alignment_callback, const auto &get_min_path_score) {
-        align_core(forward, seeder, extender, alignment_callback, get_min_path_score);
-        align_core(reverse, seeder_rc, extender_rc, alignment_callback, get_min_path_score);
-    });
-}
-
-template <class AlignmentCompare>
-inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(const ISeeder<node_index> &forward_seeder,
                         const ISeeder<node_index> &reverse_seeder,
                         IExtender<node_index> &forward_extender,
@@ -261,6 +236,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                         const SeederGenerator &rev_comp_core_generator) {
     std::string_view forward = paths_.get_query();
     std::string_view reverse = paths_.get_query(true);
+
+    bool use_rcdbg = graph_.get_mode() != DeBruijnGraph::CANONICAL && config_.forward_and_reverse_complement;
 
     align_aggregate([&](const auto &alignment_callback, const auto &get_min_path_score) {
         auto get_forward_alignments = [&](std::string_view query,
@@ -280,7 +257,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                     return;
 
                 auto rev = path;
-                rev.reverse_complement(graph_, query_rc);
+                rev.reverse_complement(use_rcdbg ? rc_dbg_ : graph_, query_rc);
+
                 if (rev.empty()) {
                     DEBUG_LOG("This local alignment cannot be reversed, skipping");
                     return;
@@ -290,7 +268,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                 // alignment can proceed
                 assert(rev.get_end_clipping());
                 rev.trim_end_clipping();
-                assert(rev.is_valid(graph_, &config_));
+                assert(rev.is_valid(use_rcdbg ? rc_dbg_ : graph_, &config_));
 
                 // Pass the reverse complement of the forward alignment
                 // as a seed for extension
@@ -307,15 +285,29 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             forward, reverse, forward_seeder, forward_extender
         );
 
+        std::string_view tquery = reverse;
+        auto alignment_cb = [&](DBGAlignment&& path) {
+            if (use_rcdbg)
+                path.reverse_complement(graph_, tquery);
+
+            alignment_callback(std::move(path));
+        };
+
         DEBUG_LOG("Extending in reverse direction");
         rev_comp_core_generator(std::move(rc_of_reverse), [&](const auto &seeder) {
-            align_core(forward, seeder, forward_extender,
-                       alignment_callback, get_min_path_score);
+            if (use_rcdbg)
+                forward_extender.set_graph(rc_dbg_);
+
+            align_core(forward, seeder, forward_extender, alignment_cb, get_min_path_score);
         });
 
+        tquery = forward;
+
         rev_comp_core_generator(std::move(rc_of_forward), [&](const auto &seeder) {
-            align_core(reverse, seeder, reverse_extender,
-                       alignment_callback, get_min_path_score);
+            if (use_rcdbg)
+                reverse_extender.set_graph(rc_dbg_);
+
+            align_core(reverse, seeder, reverse_extender, alignment_cb, get_min_path_score);
         });
     });
 }

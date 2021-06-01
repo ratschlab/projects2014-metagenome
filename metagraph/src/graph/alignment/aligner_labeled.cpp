@@ -124,7 +124,7 @@ bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(size_t j) {
     NodeType next = std::get<6>(this->table[j]);
     auto [it, inserted] = targets_.emplace(next, 0);
     if (inserted) {
-        process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
+        process_seq_path(*this->graph_, std::string(this->graph_->get_k(), '#'),
                          { next }, [this,next](auto row, size_t) {
             added_rows.push_back(row);
             added_nodes.push_back(next);
@@ -158,7 +158,7 @@ void LabeledBacktrackingExtender<NodeType>
                     const std::vector<size_t> &trace,
                     tsl::hopscotch_set<size_t> &prev_starts,
                     const std::function<void(DBGAlignment&&)> &callback) {
-    assert(alignment.is_valid(this->graph_, &this->config_));
+    assert(alignment.is_valid(*this->graph_, &this->config_));
     assert(trace.size() == alignment.size());
 
     if (alignment.empty() || alignment.get_offset()) {
@@ -172,7 +172,7 @@ void LabeledBacktrackingExtender<NodeType>
 
     Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
 
-    AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
+    AlignmentSuffix<node_index> suffix(alignment, this->config_, *this->graph_);
     while (!suffix.get_added_offset())
         ++suffix;
 

@@ -26,6 +26,8 @@ class IExtender {
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
+    virtual void set_graph(const DeBruijnGraph &graph) = 0;
+
   protected:
     virtual const DBGAlignment& get_seed() const = 0;
 };
@@ -49,8 +51,14 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual void initialize(const DBGAlignment &seed) override;
 
+    virtual void set_graph(const DeBruijnGraph &graph) override {
+        graph_ = &graph;
+        table.clear();
+        conv_checker.clear();
+    }
+
   protected:
-    const DeBruijnGraph &graph_;
+    const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
     std::string_view query_;
 
