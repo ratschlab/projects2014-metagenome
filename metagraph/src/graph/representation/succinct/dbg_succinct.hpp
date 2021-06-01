@@ -189,6 +189,8 @@ class DBGSuccinct : public DeBruijnGraph {
     Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
+
+    mutable __uint128_t last_accessed_node_pair_ = 0;
 };
 
 } // namespace graph

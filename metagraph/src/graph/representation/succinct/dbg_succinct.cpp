@@ -144,19 +144,50 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 
     auto edge = kmer_to_boss_index(node);
 
-    boss_graph_->call_incoming_to_target(boss_graph_->bwd(edge),
-        boss_graph_->get_node_last_value(edge),
+    auto edge_bwd = boss_graph_->bwd(edge);
+    boss_graph_->call_incoming_to_target(edge_bwd, boss_graph_->get_node_last_value(edge),
         [&](BOSS::edge_index incoming_boss_edge) {
             assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
                     == boss_graph_->get_node_last_value(edge));
 
             auto prev = boss_to_kmer_index(incoming_boss_edge);
             if (prev != npos) {
-                callback(prev,
-                    boss_graph_->decode(
-                        boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first
-                    )
-                );
+                BOSS::TAlphabet s = BOSS::kSentinelCode;
+                if (edge_bwd == incoming_boss_edge) {
+                    __uint128_t last_accessed_node_pair = __atomic_load_n(
+                        &last_accessed_node_pair_,
+                        std::memory_order_relaxed
+                    );
+                    uint64_t last_accessed_node = last_accessed_node_pair & 0xFFFFFFFFFFFFFFFF;
+                    uint64_t last_accessed_innode = last_accessed_node_pair >> 64;
+                    if (edge == last_accessed_node) {
+                        s = boss_graph_->get_node_last_value(last_accessed_innode);
+                        assert(s == boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first);
+
+                        auto bw = boss_graph_->bwd(last_accessed_innode);
+                        assert(boss_graph_->get_minus_k_value(boss_graph_->bwd(incoming_boss_edge), get_k() - 2).first
+                            == boss_graph_->get_node_last_value(bw));
+                        __atomic_store_n(
+                            &last_accessed_node_pair_,
+                            static_cast<__uint128_t>(incoming_boss_edge) | (static_cast<__uint128_t>(bw) << 64),
+                            std::memory_order_relaxed
+                        );
+                    }
+                }
+                if (s == BOSS::kSentinelCode) {
+                    auto [c, bw] = boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2);
+                    s = c;
+
+                    if (edge_bwd == incoming_boss_edge) {
+                        __atomic_store_n(
+                            &last_accessed_node_pair_,
+                            static_cast<__uint128_t>(incoming_boss_edge) | (static_cast<__uint128_t>(bw) << 64),
+                            std::memory_order_relaxed
+                        );
+                    }
+                }
+
+                callback(prev, boss_graph_->decode(s));
             }
         }
     );
