@@ -1,6 +1,11 @@
 #ifndef __DBG_SUCCINCT_HPP__
 #define __DBG_SUCCINCT_HPP__
 
+#include <mutex>
+
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 #include "common/vectors/bit_vector.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -190,7 +195,8 @@ class DBGSuccinct : public DeBruijnGraph {
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 
-    mutable __uint128_t last_accessed_node_pair_ = 0;
+    mutable caches::fixed_sized_cache<node_index, node_index,
+                                      caches::LRUCachePolicy<node_index>> incoming_node_cache_;
 };
 
 } // namespace graph
