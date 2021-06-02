@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <array>
+#include <mutex>
 
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>

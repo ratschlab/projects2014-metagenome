@@ -4,6 +4,7 @@
 #include <cassert>
 #include <functional>
 #include <vector>
+#include <limits>
 
 
 // A buffer for accumulating data and processing them in batches.
