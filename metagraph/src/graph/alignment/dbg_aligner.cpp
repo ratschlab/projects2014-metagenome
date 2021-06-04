@@ -281,9 +281,12 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
         std::vector<DBGAlignment> rc_of_reverse = get_forward_alignments(
             reverse, forward, reverse_seeder, reverse_extender
         );
+        std::sort(rc_of_reverse.begin(), rc_of_reverse.end(), LocalAlignmentGreater());
+
         std::vector<DBGAlignment> rc_of_forward = get_forward_alignments(
             forward, reverse, forward_seeder, forward_extender
         );
+        std::sort(rc_of_forward.begin(), rc_of_forward.end(), LocalAlignmentGreater());
 
         std::string_view tquery = reverse;
         auto alignment_cb = [&](DBGAlignment&& path) {

@@ -29,7 +29,7 @@ typedef DBGSuccinct::node_index node_index;
 DBGSuccinct::DBGSuccinct(size_t k, Mode mode)
       : boss_graph_(std::make_unique<BOSS>(k - 1)),
         mode_(mode),
-        incoming_node_cache_(100) {
+        incoming_node_cache_(1'000'000) {
     if (k < 2) {
         logger->error("For succinct graph, k must be at least 2");
         exit(1);
@@ -39,7 +39,7 @@ DBGSuccinct::DBGSuccinct(size_t k, Mode mode)
 DBGSuccinct::DBGSuccinct(BOSS *boss_graph, Mode mode)
       : boss_graph_(boss_graph),
         mode_(mode),
-        incoming_node_cache_(100) {}
+        incoming_node_cache_(1'000'000) {}
 
 size_t DBGSuccinct::get_k() const {
     return boss_graph_->get_k() + 1;
