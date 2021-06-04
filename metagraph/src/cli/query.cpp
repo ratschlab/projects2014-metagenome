@@ -46,10 +46,7 @@ QueryExecutor::QueryExecutor(const Config &config,
       : config_(config),
         anno_graph_(anno_graph),
         aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) {
-    if (aligner_config_ && aligner_config_->forward_and_reverse_complement)
-        throw std::runtime_error("Error: align_both_strands must be off when querying");
-}
+        thread_pool_(thread_pool) { }
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          const std::string &sequence,
