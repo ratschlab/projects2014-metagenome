@@ -47,7 +47,7 @@ class ExactSeeder : public ISeeder<NodeType> {
     ExactSeeder(const DeBruijnGraph &graph,
                 std::string_view query,
                 bool orientation,
-                std::vector<NodeType>&& nodes,
+                const std::vector<NodeType> &nodes,
                 const DBGAlignerConfig &config);
 
     virtual ~ExactSeeder() {}
@@ -58,10 +58,12 @@ class ExactSeeder : public ISeeder<NodeType> {
     const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
-    std::vector<NodeType> query_nodes_;
+    const std::vector<NodeType> &query_nodes_;
     const DBGAlignerConfig &config_;
     std::vector<DBGAlignerConfig::score_t> partial_sum_;
     size_t num_matching_;
+
+    size_t num_exact_matching() const;
 };
 
 template <typename NodeType = uint64_t>
@@ -111,22 +113,15 @@ class SuffixSeeder : public BaseSeeder {
     typedef typename BaseSeeder::Seed Seed;
 
     template <typename... Args>
-    SuffixSeeder(Args&&... args)
-          : BaseSeeder(std::forward<Args>(args)...),
-            dbg_succ_(get_base_dbg_succ(this->graph_)) {
-        assert(this->config_.min_seed_length < this->graph_.get_k());
-    }
+    SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {}
 
     virtual ~SuffixSeeder() {}
 
     std::vector<Seed> get_seeds() const override;
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-
-  private:
-    const DBGSuccinct &dbg_succ_;
-
     static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
+
 };
 
 } // namespace align
