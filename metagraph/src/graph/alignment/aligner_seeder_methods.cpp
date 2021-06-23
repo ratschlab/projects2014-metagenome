@@ -1,6 +1,7 @@
 #include "aligner_seeder_methods.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_cached.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -343,10 +344,14 @@ template <class BaseSeeder>
 const DBGSuccinct& SuffixSeeder<BaseSeeder>
 ::get_base_dbg_succ(const DeBruijnGraph &graph) {
     try {
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
-            return dynamic_cast<const DBGSuccinct&>(canonical->get_graph());
+        const DeBruijnGraph *base_graph = &graph;
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph))
+            base_graph = &canonical->get_graph();
 
-        return dynamic_cast<const DBGSuccinct&>(graph);
+        if (const auto *cached = dynamic_cast<const DBGSuccinctCached*>(base_graph))
+            base_graph = &cached->get_dbg_succ();
+
+        return dynamic_cast<const DBGSuccinct&>(*base_graph);
     } catch (const std::bad_cast &e) {
         common::logger->error("SuffixSeeder can be used only with succinct graph representation");
         throw e;
