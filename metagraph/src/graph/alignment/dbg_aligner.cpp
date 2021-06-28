@@ -196,6 +196,12 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
     bool use_rcdbg = graph_.get_mode() != DeBruijnGraph::CANONICAL && config_.forward_and_reverse_complement;
 
+    auto is_reversible = [this](const DBGAlignment &alignment) {
+        return graph_.get_mode() == DeBruijnGraph::CANONICAL
+            && alignment.get_orientation()
+            && !alignment.get_offset();
+    };
+
     align_aggregate([&](const auto &alignment_callback, const auto &get_min_path_score) {
         auto get_forward_alignments = [&](std::string_view query,
                                           std::string_view query_rc,
@@ -205,16 +211,25 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
             DEBUG_LOG("Extending in forwards direction");
             align_core(query, seeder, extender, [&](DBGAlignment&& path) {
+                const DeBruijnGraph &rc_graph = use_rcdbg ? rc_dbg_ : graph_;
+
                 score_t min_path_score = get_min_path_score(path);
 
-                if (path.get_score() >= min_path_score)
-                    alignment_callback(DBGAlignment(path));
+                if (path.get_score() >= min_path_score) {
+                    if (is_reversible(path)) {
+                        auto out_path = path;
+                        out_path.reverse_complement(graph_, query_rc);
+                        alignment_callback(std::move(out_path));
+                    } else {
+                        alignment_callback(DBGAlignment(path));
+                    }
+                }
 
                 if (!path.get_clipping() || path.get_offset())
                     return;
 
                 auto rev = path;
-                rev.reverse_complement(use_rcdbg ? rc_dbg_ : graph_, query_rc);
+                rev.reverse_complement(rc_graph, query_rc);
 
                 if (rev.empty()) {
                     DEBUG_LOG("This local alignment cannot be reversed, skipping");
@@ -225,7 +240,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                 // alignment can proceed
                 assert(rev.get_end_clipping());
                 rev.trim_end_clipping();
-                assert(rev.is_valid(use_rcdbg ? rc_dbg_ : graph_, &config_));
+                assert(rev.is_valid(rc_graph, &config_));
 
                 // Pass the reverse complement of the forward alignment
                 // as a seed for extension
@@ -248,7 +263,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
         std::string_view tquery = reverse;
         auto alignment_cb = [&](DBGAlignment&& path) {
-            if (use_rcdbg)
+            if (use_rcdbg || is_reversible(path))
                 path.reverse_complement(graph_, tquery);
 
             alignment_callback(std::move(path));

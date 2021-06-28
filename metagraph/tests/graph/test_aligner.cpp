@@ -522,13 +522,11 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3), -3, -1);
-    config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(2u, paths.size());
-    EXPECT_NE(paths[0], paths[1]);
+    ASSERT_EQ(1u, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 2, path.size());
@@ -563,18 +561,16 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     auto paths = aligner.align(query);
 
     EXPECT_EQ(config.num_alternative_paths, paths.size());
-    for (const auto &path : paths) {
-        EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
-            << query << "\n" << path.get_sequence();
-        EXPECT_EQ(10u, path.get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-    }
-
+    auto path = paths[0];
+    EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
+        << query << "\n" << path.get_sequence();
+    EXPECT_EQ(10u, path.get_num_matches());
+    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_EQ(0u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
@@ -1277,9 +1273,10 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 
                 if (discovery_fraction == 0.0) {
                     ASSERT_EQ(2ull, paths.size());
-                    EXPECT_EQ(557llu, paths[0].get_score()) << xdrop << "\n" << paths[0];
-                    EXPECT_EQ(556llu, paths[1].get_score()) << xdrop << "\n" << paths[1];
                     EXPECT_NE(paths[0], paths[1]);
+                    EXPECT_FALSE(paths[0].get_orientation());
+                    EXPECT_FALSE(paths[1].get_orientation());
+                    EXPECT_GE(paths[0].get_score(), paths[1].get_score());
                 } else {
                     EXPECT_EQ(0ull, paths.size());
                 }
