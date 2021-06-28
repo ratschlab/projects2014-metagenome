@@ -206,8 +206,8 @@ Config::Config(int argc, char *argv[]) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
-        } else if (!strcmp(argv[i], "--align-both-strands")) {
-            align_both_strands = true;
+        } else if (!strcmp(argv[i], "--align-one-strand")) {
+            align_one_strand = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
@@ -479,11 +479,6 @@ Config::Config(int argc, char *argv[]) {
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
     }
-
-    // No need to align in the both strands mode if we align
-    // both forward and reverse complement sequences anyway.
-    if (forward_and_reverse)
-        align_both_strands = false;
 
     if (alignment_min_seed_length > alignment_max_seed_length) {
         std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
@@ -938,7 +933,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
-            fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-one-strand \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
@@ -1181,7 +1176,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-one-strand \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
