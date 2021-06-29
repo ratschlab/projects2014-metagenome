@@ -115,6 +115,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, core.get_aggregator());
 
+#if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                 || config_.forward_and_reverse_complement) {
             assert(!is_reverse_complement);
@@ -135,6 +136,9 @@ void ISeedAndExtendAligner<AlignmentCompare>
         } else {
             core.align_one_direction(is_reverse_complement, *seeder, *extender);
         }
+#else
+        core.align_one_direction(is_reverse_complement, *seeder, *extender);
+#endif
 
         core.flush();
 
@@ -191,6 +195,10 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                         const ISeeder<node_index> &reverse_seeder,
                         IExtender<node_index> &forward_extender,
                         IExtender<node_index> &reverse_extender) {
+#if _PROTEIN_GRAPH
+    throw std::runtime_error("Only alignment in one direction supported for Protein graphs");
+#endif
+
     std::string_view forward = paths_.get_query();
     std::string_view reverse = paths_.get_query(true);
 
