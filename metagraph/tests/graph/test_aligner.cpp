@@ -247,6 +247,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
+
 TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
@@ -294,6 +296,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 }
+
+#endif
 
 
 TYPED_TEST(DBGAlignerTest, align_ending_branch) {
@@ -1539,6 +1543,10 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
 
     for (bool both_directions : { false, true }) {
+#if _PROTEIN_GRAPH
+        if (both_directions)
+            continue;
+#endif
         config.forward_and_reverse_complement = both_directions;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
