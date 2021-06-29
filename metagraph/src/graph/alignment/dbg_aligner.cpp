@@ -216,12 +216,17 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                                           std::string_view query_rc,
                                           const ISeeder<node_index> &seeder,
                                           IExtender<node_index> &extender) {
+            size_t farthest_reach = 0;
+            score_t max_score = config_.min_cell_score;
             std::vector<DBGAlignment> rc_of_alignments;
 
             DEBUG_LOG("Extending in forwards direction");
             align_core(query, seeder, extender,
                 [&](DBGAlignment&& path) {
                     score_t min_path_score = get_min_path_score(path);
+
+                    farthest_reach = std::max(farthest_reach, path.get_query().size() + path.get_clipping());
+                    max_score = std::max(max_score, path.get_score());
 
                     if (path.get_score() >= min_path_score) {
                         if (is_reversible(path)) {
@@ -253,7 +258,12 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                     // as a seed for extension
                     rc_of_alignments.emplace_back(std::move(rev));
                 },
-                [&](const auto&) { return config_.min_cell_score; }
+                [&](const DBGAlignment &seed) {
+                    return seed.get_clipping() <= farthest_reach
+                        && config_.fraction_of_top > 0
+                            ? max_score * config_.fraction_of_top
+                            : config_.min_cell_score;
+                }
             );
 
             std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
