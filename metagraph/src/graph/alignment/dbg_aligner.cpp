@@ -272,25 +272,26 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             forward, reverse, forward_seeder, forward_extender
         ));
 
-        std::string_view tquery = reverse;
-        auto alignment_cb = [&](DBGAlignment&& path) {
-            if (use_rcdbg || is_reversible(path))
-                path.reverse_complement(graph_, tquery);
+        auto finish_alignment = [&](std::string_view query,
+                                    std::string_view query_rc,
+                                    const ManualSeeder<node_index> &seeder,
+                                    IExtender<node_index> &extender) {
+            if (use_rcdbg)
+                extender.set_graph(rc_dbg_);
 
-            alignment_callback(std::move(path));
+            align_core(query_rc, seeder, extender,
+                [&](DBGAlignment&& path) {
+                    if (use_rcdbg || is_reversible(path))
+                        path.reverse_complement(graph_, query);
+
+                    alignment_callback(std::move(path));
+                },
+                get_min_path_score
+            );
         };
 
-        DEBUG_LOG("Extending in reverse direction");
-        if (use_rcdbg) {
-            forward_extender.set_graph(rc_dbg_);
-            reverse_extender.set_graph(rc_dbg_);
-        }
-
-        align_core(forward, rc_of_reverse, forward_extender, alignment_cb, get_min_path_score);
-
-        tquery = forward;
-
-        align_core(reverse, rc_of_forward, reverse_extender, alignment_cb, get_min_path_score);
+        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
     });
 }
 
