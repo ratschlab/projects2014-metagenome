@@ -133,7 +133,7 @@ bool SeedFilteringExtender<NodeType>::filter_nodes(node_index node,
         std::fill(s_merged.begin() + query_start, s_merged.begin() + query_end, mscore);
         return true;
     } else {
-        score_t *s_merged = it.value().data() + query_start;
+        score_t *s_merged = it.value().data();
         bool converged = true;
         for (size_t j = query_start; j < query_end; ++j) {
             if (mscore > s_merged[j]) {
