@@ -218,42 +218,45 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             std::vector<DBGAlignment> rc_of_alignments;
 
             DEBUG_LOG("Extending in forwards direction");
-            align_core(query, seeder, extender, [&](DBGAlignment&& path) {
-                const DeBruijnGraph &rc_graph = use_rcdbg ? rc_dbg_ : graph_;
+            align_core(query, seeder, extender,
+                [&](DBGAlignment&& path) {
+                    const DeBruijnGraph &rc_graph = use_rcdbg ? rc_dbg_ : graph_;
 
-                score_t min_path_score = get_min_path_score(path);
+                    score_t min_path_score = get_min_path_score(path);
 
-                if (path.get_score() >= min_path_score) {
-                    if (is_reversible(path)) {
-                        auto out_path = path;
-                        out_path.reverse_complement(graph_, query_rc);
-                        alignment_callback(std::move(out_path));
-                    } else {
-                        alignment_callback(DBGAlignment(path));
+                    if (path.get_score() >= min_path_score) {
+                        if (is_reversible(path)) {
+                            auto out_path = path;
+                            out_path.reverse_complement(graph_, query_rc);
+                            alignment_callback(std::move(out_path));
+                        } else {
+                            alignment_callback(DBGAlignment(path));
+                        }
                     }
-                }
 
-                if (!path.get_clipping() || path.get_offset())
-                    return;
+                    if (!path.get_clipping() || path.get_offset())
+                        return;
 
-                auto rev = path;
-                rev.reverse_complement(rc_graph, query_rc);
+                    auto rev = path;
+                    rev.reverse_complement(rc_graph, query_rc);
 
-                if (rev.empty()) {
-                    DEBUG_LOG("This local alignment cannot be reversed, skipping");
-                    return;
-                }
+                    if (rev.empty()) {
+                        DEBUG_LOG("This local alignment cannot be reversed, skipping");
+                        return;
+                    }
 
-                // Remove any character skipping from the end so that the
-                // alignment can proceed
-                assert(rev.get_end_clipping());
-                rev.trim_end_clipping();
-                assert(rev.is_valid(rc_graph, &config_));
+                    // Remove any character skipping from the end so that the
+                    // alignment can proceed
+                    assert(rev.get_end_clipping());
+                    rev.trim_end_clipping();
+                    assert(rev.is_valid(rc_graph, &config_));
 
-                // Pass the reverse complement of the forward alignment
-                // as a seed for extension
-                rc_of_alignments.emplace_back(std::move(rev));
-            }, [&](const auto&) { return config_.min_cell_score; });
+                    // Pass the reverse complement of the forward alignment
+                    // as a seed for extension
+                    rc_of_alignments.emplace_back(std::move(rev));
+                },
+                [&](const auto&) { return config_.min_cell_score; }
+            );
 
             std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
                       LocalAlignmentGreater());
