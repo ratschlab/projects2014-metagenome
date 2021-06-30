@@ -292,8 +292,14 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             );
         };
 
-        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
-        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+        if (rc_of_forward.data().size() && (rc_of_reverse.data().empty()
+                || rc_of_forward.data()[0].get_score() >= rc_of_reverse.data()[0].get_score())) {
+            finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+            finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+        } else {
+            finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+            finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+        }
     });
 }
 

@@ -33,6 +33,7 @@ class ManualSeeder : public ISeeder<NodeType> {
     virtual ~ManualSeeder() {}
 
     std::vector<Seed> get_seeds() const override { return seeds_; }
+    std::vector<Seed>& data() { return seeds_; }
 
   private:
     std::vector<Seed> seeds_;
