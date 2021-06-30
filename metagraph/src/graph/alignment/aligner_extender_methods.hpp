@@ -53,7 +53,7 @@ class SeedFilteringExtender : public IExtender<NodeType> {
     const DBGAlignment *seed_ = nullptr;
     size_t query_size_;
 
-    typedef AlignedVector<score_t> ScoreVec;
+    typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
     tsl::hopscotch_map<NodeType, ScoreVec> conv_checker_;
 
     virtual const DBGAlignment& get_seed() const override final { return *seed_; }

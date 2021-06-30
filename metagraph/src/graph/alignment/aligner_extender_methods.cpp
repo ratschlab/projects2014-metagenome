@@ -61,10 +61,11 @@ bool SeedFilteringExtender<NodeType>::set_seed(const DBGAlignment &seed) {
 
     auto it = conv_checker_.find(seed.back());
 
-    if (it != conv_checker_.end()
-            && it->second.at(seed.get_query().size() + seed.get_clipping() - 1)
-                < seed.get_score()) {
-        it = conv_checker_.end();
+    if (it != conv_checker_.end()) {
+        size_t pos = seed.get_query().size() + seed.get_clipping() - 1;
+        const auto &[start, vec] = it->second;
+        if (pos < start || pos - start >= vec.size() || vec[pos - start] < seed.get_score())
+            it = conv_checker_.end();
     }
 
     if (it == conv_checker_.end()) {
@@ -95,25 +96,50 @@ bool SeedFilteringExtender<NodeType>::update_seed_filter(node_index node,
                                                          const score_t *s_end) {
     assert(s_end >= s_begin);
     assert(query_start + (s_end - s_begin) <= query_size_);
-    auto it = conv_checker_.find(node);
-    if (it == conv_checker_.end()) {
-        ScoreVec &s_merged = conv_checker_.emplace(
-            node, ScoreVec(query_size_, ninf)
-        ).first.value();
-        std::copy(s_begin, s_end, s_merged.begin() + query_start);
-        return true;
-    } else {
-        score_t *s_merged = it.value().data() + query_start;
-        bool converged = true;
-        size_t size = s_end - s_begin;
-        for (size_t j = 0; j < size; ++j) {
-            if (s_begin[j] > s_merged[j]) {
-                converged = false;
-                s_merged[j] = s_begin[j];
-            }
-        }
 
-        return !converged;
+    size_t size = s_end - s_begin;
+
+    auto it = conv_checker_.find(node);
+
+    if (it == conv_checker_.end()) {
+        conv_checker_.emplace(node, ScoreVec(query_start, { s_begin, s_end }));
+        return true;
+
+    } else {
+        auto &[start, vec] = it.value();
+        if (query_start + size <= start) {
+            vec.insert(vec.begin(), start - query_start, ninf);
+            std::copy(s_begin, s_end, vec.begin());
+            start = query_start;
+            return true;
+
+        } else if (query_start >= start + vec.size()) {
+            vec.reserve(query_start + size - start);
+            vec.insert(vec.end(), query_start - start - vec.size(), ninf);
+            vec.insert(vec.end(), s_begin, s_end);
+            return true;
+
+        } else {
+            // overlap
+            if (query_start < start) {
+                vec.insert(vec.begin(), start - query_start, ninf);
+                start = query_start;
+            }
+
+            if (query_start + size > start + vec.size())
+                vec.resize(query_start + size - start, ninf);
+
+            bool converged = true;
+            score_t *v = vec.data() + query_start - start;
+            for (size_t j = 0; j < size; ++j) {
+                if (s_begin[j] > v[j]) {
+                    converged = false;
+                    v[j] = s_begin[j];
+                }
+            }
+
+            return !converged;
+        }
     }
 }
 
@@ -124,25 +150,50 @@ bool SeedFilteringExtender<NodeType>::filter_nodes(node_index node,
     assert(query_end >= query_start);
     assert(query_end <= query_size_);
     constexpr score_t mscore = -ninf;
+    size_t size = query_end - query_start;
 
     auto it = conv_checker_.find(node);
     if (it == conv_checker_.end()) {
-        ScoreVec &s_merged = conv_checker_.emplace(
-            node, ScoreVec(query_size_, ninf)
-        ).first.value();
-        std::fill(s_merged.begin() + query_start, s_merged.begin() + query_end, mscore);
+        conv_checker_.emplace(
+            node, ScoreVec(query_start, AlignedVector<score_t>(size, mscore))
+        );
         return true;
-    } else {
-        score_t *s_merged = it.value().data();
-        bool converged = true;
-        for (size_t j = query_start; j < query_end; ++j) {
-            if (mscore > s_merged[j]) {
-                converged = false;
-                s_merged[j] = mscore;
-            }
-        }
 
-        return !converged;
+    } else {
+        auto &[start, vec] = it.value();
+        if (query_start + size <= start) {
+            vec.insert(vec.begin(), start - query_start, ninf);
+            std::fill(vec.begin(), vec.begin() + size, mscore);
+            start = query_start;
+            return true;
+
+        } else if (query_start >= start + vec.size()) {
+            vec.reserve(query_start + size - start);
+            vec.insert(vec.end(), query_start - start - vec.size(), ninf);
+            vec.insert(vec.end(), size, mscore);
+            return true;
+
+        } else {
+            // overlap
+            if (query_start < start) {
+                vec.insert(vec.begin(), start - query_start, ninf);
+                start = query_start;
+            }
+
+            if (query_start + size > start + vec.size())
+                vec.resize(query_start + size - start, ninf);
+
+            bool converged = true;
+            score_t *v = vec.data() + query_start - start;
+            for (size_t j = 0; j < size; ++j) {
+                if (mscore > v[j]) {
+                    converged = false;
+                    v[j] = mscore;
+                }
+            }
+
+            return !converged;
+        }
     }
 }
 
@@ -542,7 +593,7 @@ auto DefaultColumnExtender<NodeType>
 ::extend(score_t min_path_score) -> std::vector<DBGAlignment> {
     assert(this->seed_);
 
-    typedef typename SeedFilteringExtender<NodeType>::ScoreVec ScoreVec;
+    typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
 
     typedef std::tuple<ScoreVec, ScoreVec, ScoreVec, OpVec, OpVec, OpVec,
