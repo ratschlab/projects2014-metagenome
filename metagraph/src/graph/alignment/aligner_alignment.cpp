@@ -89,7 +89,6 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             orientation_ = !orientation_;
             query_ = { query_rev_comp.data() + get_clipping(),
                        query_rev_comp.size() - get_clipping() - get_end_clipping() };
-            assert(is_valid(graph));
         }
         return;
     }
