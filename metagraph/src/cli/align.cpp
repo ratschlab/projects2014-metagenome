@@ -36,7 +36,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
     aligner_config.max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char;
     aligner_config.max_ram_per_alignment = config.alignment_max_ram;
-    aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
     aligner_config.xdrop = config.alignment_xdrop;
     aligner_config.min_exact_match = config.alignment_min_exact_match;

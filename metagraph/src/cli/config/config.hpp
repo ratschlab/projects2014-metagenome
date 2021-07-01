@@ -110,7 +110,6 @@ class Config {
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
 
-    int32_t alignment_min_cell_score = std::numeric_limits<int32_t>::min() + 100;
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
