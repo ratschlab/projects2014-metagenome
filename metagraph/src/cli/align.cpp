@@ -439,8 +439,11 @@ int align_to_graph(Config *config) {
                 auto aln_graph = graph;
                 const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph.get());
                 bool is_primary = aln_graph->get_mode() == DeBruijnGraph::PRIMARY;
+                bool use_cache = dbg_succ && (is_primary
+                    || (aligner_config.forward_and_reverse_complement
+                        && aln_graph->get_mode() != DeBruijnGraph::CANONICAL));
 
-                if (dbg_succ && (is_primary || aligner_config.forward_and_reverse_complement))
+                if (use_cache)
                     aln_graph = std::make_shared<DBGSuccinctCached>(*dbg_succ);
 
                 if (is_primary)
