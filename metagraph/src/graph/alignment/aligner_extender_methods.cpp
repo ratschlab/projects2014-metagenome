@@ -361,10 +361,12 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
     }
 
     std::sort(indices.begin(), indices.end(), [&table](size_t i, size_t j) {
-        const auto &a = table[i];
-        const auto &b = table[j];
-        return std::get<0>(a)[std::get<7>(a) - std::get<8>(a)]
-            > std::get<0>(b)[std::get<7>(b) - std::get<8>(b)];
+        const auto &[S_a, E_a, F_a, node_a, j_prev_a, c_a, offset_a, max_pos_a, trim_a] = table[i];
+        const auto &[S_b, E_b, F_b, node_b, j_prev_b, c_b, offset_b, max_pos_b, trim_b] = table[j];
+        ssize_t off_diag_a = std::abs(static_cast<ssize_t>(max_pos_a) - static_cast<ssize_t>(offset_a));
+        ssize_t off_diag_b = std::abs(static_cast<ssize_t>(max_pos_b) - static_cast<ssize_t>(offset_b));
+        return std::make_tuple(S_a[max_pos_a - trim_a], off_diag_b, j)
+            > std::make_tuple(S_b[max_pos_b - trim_b], off_diag_a, i);
     });
 
     for (size_t i = 0; i < indices.size(); ++i) {
@@ -585,8 +587,8 @@ auto DefaultColumnExtender<NodeType>
         bool operator()(const Ref &a, const Ref &b) const {
             const auto &[a_score, a_id, a_max_pos, a_offset] = a;
             const auto &[b_score, b_id, b_max_pos, b_offset] = b;
-            return std::make_pair(a_score, std::abs(b_max_pos - b_offset))
-                < std::make_pair(b_score, std::abs(a_max_pos - a_offset));
+            return std::make_tuple(a_score, std::abs(b_max_pos - b_offset), b_id)
+                < std::make_tuple(b_score, std::abs(a_max_pos - a_offset), a_id);
         }
     };
 
@@ -692,8 +694,8 @@ auto DefaultColumnExtender<NodeType>
 
                 ssize_t s_offset = static_cast<ssize_t>(offset + 1);
                 for (size_t j = 0; j < S.size(); ++j) {
-                    if (std::make_pair(S[j], std::abs(static_cast<ssize_t>(max_pos) - s_offset))
-                            > std::make_pair(S[max_pos - begin], std::abs(static_cast<ssize_t>(j + begin) - s_offset))) {
+                    if (std::make_pair(S[j], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(s_offset)))
+                            > std::make_pair(S[max_pos - begin], std::abs(static_cast<ssize_t>(j + begin) - static_cast<ssize_t>(s_offset)))) {
                         max_pos = j + begin;
                     }
                 }
