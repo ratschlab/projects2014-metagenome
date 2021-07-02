@@ -17,6 +17,8 @@ constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 9;
 
+#define WRAP_MEMBER(x) [this](auto&&... args) { return x(std::forward<decltype(args)>(args)...); }
+
 
 template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
@@ -336,14 +338,16 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
                                            const DBGAlignerConfig &config_,
                                            const ProfileOps &profile_ops,
                                            score_t min_path_score,
-                                           size_t seed_clipping,
-                                           size_t seed_offset,
-                                           bool orientation,
+                                           const Alignment<NodeType> &seed,
                                            std::string_view query_,
                                            std::string_view window) {
     typedef Alignment<NodeType> DBGAlignment;
     std::vector<DBGAlignment> extensions;
     tsl::hopscotch_set<size_t> prev_starts;
+
+    size_t seed_clipping = seed.get_clipping();
+    size_t seed_offset = seed.get_offset();
+    bool orientation = seed.get_orientation();
 
     std::vector<size_t> indices;
     indices.reserve(table.size());
@@ -745,24 +749,10 @@ auto DefaultColumnExtender<NodeType>
 
     if (table.size()) {
         init_backtrack();
-        return backtrack<NodeType>(table,
-            [this](const std::vector<DBGAlignment> &extensions) {
-                return skip_backtrack_start(extensions);
-            },
-            [this](DBGAlignment&& extension,
-                   const std::vector<size_t> &trace,
-                   tsl::hopscotch_set<size_t> &prev_starts,
-                   score_t min_path_score,
-                   const std::function<void(DBGAlignment&&)> &callback) {
-                assert(extension.is_valid(*graph_, &config_));
-                process_extension(std::move(extension), trace, prev_starts,
-                                  min_path_score, callback);
-            },
-            graph_, config_, profile_op_, min_path_score,
-            this->seed_->get_clipping(),
-            this->seed_->get_offset(), this->seed_->get_orientation(),
-            query_, window
-        );
+        return backtrack<NodeType>(table, WRAP_MEMBER(skip_backtrack_start),
+                                   WRAP_MEMBER(process_extension), graph_, config_,
+                                   profile_op_, min_path_score, *this->seed_,
+                                   query_, window);
     } else {
         return {};
     }
