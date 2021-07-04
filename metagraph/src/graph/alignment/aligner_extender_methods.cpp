@@ -15,7 +15,7 @@ typedef DBGAlignerConfig::score_t score_t;
 constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
 // to ensure that SIMD operations on arrays don't read out of bounds
-constexpr size_t kPadding = 9;
+constexpr size_t kPadding = 5;
 
 #define WRAP_MEMBER(x) [this](auto&&... args) { return x(std::forward<decltype(args)>(args)...); }
 
@@ -211,9 +211,9 @@ void update_column(size_t prev_end,
                    const score_t *profile_scores,
                    score_t xdrop_cutoff,
                    const DBGAlignerConfig &config_) {
-#ifndef __AVX2__
+#ifndef __SSE4_1__
     for (size_t j = 0; j < prev_end; ++j) {
-        score_t match = (j ? S_prev_v[j - 1] : ninf) + profile_scores[j];
+        score_t match = j ? (S_prev_v[j - 1] + profile_scores[j]) : ninf;
         score_t del_score = std::max(
             S_prev_v[j] + config_.gap_opening_penalty,
             F_prev_v[j] + config_.gap_extension_penalty
@@ -228,55 +228,47 @@ void update_column(size_t prev_end,
             S_v[j] = match;
     }
 #else
-    for (size_t j = 0; j < prev_end; j += 8) {
-        // match = (j ? S_prev_v[j - 1] : ninf) + profile_scores[j];
-        __m256i match_in;
-        if (j) {
-            match_in = _mm256_loadu_si256((__m256i*)&S_prev_v[j - 1]);
-        } else {
-            match_in = _mm256_permutevar8x32_epi32(
-                _mm256_loadu_si256((__m256i*)&S_prev_v[j]),
-                _mm256_set_epi32(6, 5, 4, 3, 2, 1, 0, 0)
-            );
-            match_in = _mm256_insert_epi32(match_in, ninf, 0);
-        }
-
-        __m256i match = _mm256_add_epi32(
-            match_in,
-            _mm256_loadu_si256((__m256i*)&profile_scores[j])
+    const __m128i gap_open = _mm_set1_epi32(config_.gap_opening_penalty);
+    const __m128i gap_extend = _mm_set1_epi32(config_.gap_extension_penalty);
+    const __m128i xdrop_v = _mm_set1_epi32(xdrop_cutoff - 1);
+    const __m128i ninf_v = _mm_set1_epi32(ninf);
+    const __m128i prev_end_v = _mm_set1_epi32(prev_end);
+    __m128i j_v = _mm_set_epi32(3, 2, 1, 0);
+    for (size_t j = 0; j < prev_end; j += 4) {
+        // match = j ? S_prev_v[j - 1] + profile_scores[j] : ninf;
+        __m128i match = _mm_add_epi32(
+            _mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
+            _mm_loadu_si128((__m128i*)&profile_scores[j])
         );
 
-        // del_open = S_prev_v[j] + config_.gap_opening_penalty;
-        __m256i del_open = _mm256_add_epi32(
-            _mm256_loadu_si256((__m256i*)&S_prev_v[j]),
-            _mm256_set1_epi32(config_.gap_opening_penalty)
-        );
-
-        // del_extend = F_prev_v[j] + config_.gap_extension_penalty;
-        __m256i del_extend = _mm256_add_epi32(
-            _mm256_loadu_si256((__m256i*)&F_prev_v[j]),
-            _mm256_set1_epi32(config_.gap_extension_penalty)
-        );
+        if (!j)
+            match = _mm_insert_epi32(match, ninf, 0);
 
         // del_score = std::max(del_open, del_extend);
-        __m256i del_score = _mm256_max_epi32(del_open, del_extend);
+        __m128i del_score = _mm_max_epi32(
+            _mm_add_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j]), gap_open),
+            _mm_add_epi32(_mm_loadu_si128((__m128i*)&F_prev_v[j]), gap_extend)
+        );
 
-        __m256i xdrop_v = _mm256_set1_epi32(xdrop_cutoff - 1);
+        // j < prev_end
+        __m128i bound = _mm_cmpgt_epi32(prev_end_v, j_v);
+        j_v = _mm_add_epi32(j_v, _mm_set1_epi32(4));
 
         // if (del_score >= xdrop_cutoff) F_v[j] = del_score
-        __m256i del_mask = _mm256_cmpgt_epi32(del_score, xdrop_v);
-        del_score = _mm256_blendv_epi8(_mm256_set1_epi32(ninf), del_score, del_mask);
-        _mm256_store_si256((__m256i*)&F_v[j], del_score);
+        __m128i del_mask = _mm_cmpgt_epi32(del_score, xdrop_v);
+        del_mask = _mm_and_si128(del_mask, bound);
+        del_score = _mm_blendv_epi8(ninf_v, del_score, del_mask);
+        _mm_store_si128((__m128i*)&F_v[j], del_score);
 
         // match = max(match, del_score)
-        match = _mm256_max_epi32(match, del_score);
+        match = _mm_max_epi32(match, del_score);
 
         // if (match >= xdrop_cutoff) S_v[j] = match
-        __m256i mask = _mm256_cmpgt_epi32(match, xdrop_v);
-        match = _mm256_blendv_epi8(_mm256_set1_epi32(ninf), match, mask);
-        _mm256_store_si256((__m256i*)&S_v[j], match);
+        __m128i mask = _mm_cmpgt_epi32(match, xdrop_v);
+        mask = _mm_and_si128(mask, bound);
+        match = _mm_blendv_epi8(ninf_v, match, mask);
+        _mm_store_si128((__m128i*)&S_v[j], match);
     }
-    _mm256_zeroupper();
 #endif
 
     if (S_v.size() > prev_end) {
@@ -330,12 +322,13 @@ void extend_ins(ScoreVec &S,
     }
 }
 
-template <typename NodeType, class Table, class Skipper, class Processor, class ProfileOps>
+template <typename NodeType, class Table, class Skipper, class Processor, class ProfileScores, class ProfileOps>
 std::vector<Alignment<NodeType>> backtrack(const Table &table,
                                            const Skipper &skip_backtrack_start,
                                            const Processor &process_extension,
                                            const DeBruijnGraph *graph_,
                                            const DBGAlignerConfig &config_,
+                                           const ProfileScores &profile_scores,
                                            const ProfileOps &profile_ops,
                                            score_t min_path_score,
                                            const Alignment<NodeType> &seed,
@@ -353,13 +346,17 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
     indices.reserve(table.size());
     for (size_t i = 1; i < table.size(); ++i) {
         const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[i];
-        const auto &S_p = std::get<0>(table[j_prev]);
+        const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+        if (max_pos < trim_p + 1)
+            continue;
 
         size_t pos = max_pos - trim;
-        if (S[pos] >= std::max(E[pos], F[pos])
-                && S[pos] > S_p[pos - 1]
-                && S[pos] >= min_path_score
-                && offset >= graph_->get_k() - 1) {
+        size_t pos_p = max_pos - trim_p - 1;
+        if (S[pos] >= min_path_score
+                && offset >= graph_->get_k() - 1
+                && S[pos] == S_p[pos_p] + profile_scores.find(c)->second[seed_clipping + max_pos]
+                && profile_ops.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
             indices.emplace_back(i);
         }
     }
@@ -428,6 +425,9 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
         while (j) {
             assert(j != static_cast<size_t>(-1));
             const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
+            const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+            assert(pos >= trim);
             assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
             assert(c == graph_->get_node_sequence(node)[std::min(graph_->get_k() - 1, offset)]);
 
@@ -447,27 +447,29 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
 
             if (S[pos - trim] == ninf) {
                 j = 0;
-            } else if (S[pos - trim] == E[pos - trim]) {
-                // insertion
-                Cigar::Operator last_op = Cigar::INSERTION;
-                while (last_op == Cigar::INSERTION) {
-                    ops.append(last_op);
-
-                    assert(E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
-                        || E[pos - trim] == S[pos - trim - 1] + config_.gap_opening_penalty);
-
-                    last_op = E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
-                        ? Cigar::INSERTION
-                        : Cigar::MATCH;
-
-                    --pos;
+            } else if (pos && pos >= trim_p + 1
+                    && S[pos - trim] == S_p[pos - trim_p - 1]
+                        + profile_scores.find(c)->second[seed_clipping + pos]) {
+                // match/mismatch
+                if (offset >= graph_->get_k() - 1) {
+                    path.emplace_back(node);
+                    trace.emplace_back(j);
                 }
-            } else if (S[pos - trim] == F[pos - trim]) {
+
+                seq += c;
+                ops.append(profile_ops.find(c)->second[seed_clipping + pos]);
+                --pos;
+                assert(j_prev != static_cast<size_t>(-1));
+                j = j_prev;
+
+            } else if (S[pos - trim] == F[pos - trim] && ops.size() && ops.back().first != Cigar::INSERTION) {
                 // deletion
                 Cigar::Operator last_op = Cigar::DELETION;
                 while (last_op == Cigar::DELETION && j) {
                     const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
                     const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+                    assert(pos >= trim_p);
 
                     assert(F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
                         || F[pos - trim] == S_p[pos - trim_p] + config_.gap_opening_penalty);
@@ -486,18 +488,23 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
                     assert(j_prev != static_cast<size_t>(-1));
                     j = j_prev;
                 }
-            } else {
-                // match/mismatch
-                if (offset >= graph_->get_k() - 1) {
-                    path.emplace_back(node);
-                    trace.emplace_back(j);
-                }
+            } else if (pos && S[pos - trim] == E[pos - trim] && ops.size() && ops.back().first != Cigar::DELETION) {
+                // insertion
+                Cigar::Operator last_op = Cigar::INSERTION;
+                while (last_op == Cigar::INSERTION) {
+                    ops.append(last_op);
 
-                seq += c;
-                ops.append(profile_ops.find(c)->second[seed_clipping + pos]);
-                --pos;
-                assert(j_prev != static_cast<size_t>(-1));
-                j = j_prev;
+                    assert(E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
+                        || E[pos - trim] == S[pos - trim - 1] + config_.gap_opening_penalty);
+
+                    last_op = E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
+                        ? Cigar::INSERTION
+                        : Cigar::MATCH;
+
+                    --pos;
+                }
+            } else {
+                assert(false && "One of the above should apply");
             }
         }
 
@@ -757,8 +764,8 @@ auto DefaultColumnExtender<NodeType>
         init_backtrack();
         return backtrack<NodeType>(table, WRAP_MEMBER(skip_backtrack_start),
                                    WRAP_MEMBER(process_extension), graph_, config_,
-                                   profile_op_, min_path_score, *this->seed_,
-                                   query_, window);
+                                   profile_score_, profile_op_, min_path_score,
+                                   *this->seed_, query_, window);
     } else {
         return {};
     }
