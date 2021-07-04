@@ -238,7 +238,6 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
                     auto rev = path;
                     rev.reverse_complement(rc_graph, query_rc);
-                    assert(rev.is_valid(rc_graph, &config_));
 
                     if (rev.empty()) {
                         DEBUG_LOG("This local alignment cannot be reversed, skipping");
@@ -249,7 +248,6 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                     // alignment can proceed
                     assert(rev.get_end_clipping());
                     rev.trim_end_clipping();
-                    assert(rev.is_valid(rc_graph, &config_));
 
                     // Pass the reverse complement of the forward alignment
                     // as a seed for extension
@@ -283,9 +281,9 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                 [&](DBGAlignment&& path) {
                     if (use_rcdbg || is_reversible(path)) {
                         path.reverse_complement(rc_graph, query);
-                        assert(path.is_valid(graph_, &config_));
                     }
 
+                    assert(path.is_valid(graph_, &config_));
                     alignment_callback(std::move(path));
                 },
                 get_min_path_score
