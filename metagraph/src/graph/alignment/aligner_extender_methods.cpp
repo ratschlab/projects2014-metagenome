@@ -445,11 +445,16 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
             if (pos == max_pos)
                 prev_starts.emplace(j);
 
-            if (S[pos - trim] == E[pos - trim]) {
+            if (S[pos - trim] == ninf) {
+                j = 0;
+            } else if (S[pos - trim] == E[pos - trim]) {
                 // insertion
                 Cigar::Operator last_op = Cigar::INSERTION;
                 while (last_op == Cigar::INSERTION) {
                     ops.append(last_op);
+
+                    assert(E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
+                        || E[pos - trim] == S[pos - trim - 1] + config_.gap_opening_penalty);
 
                     last_op = E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
                         ? Cigar::INSERTION
@@ -462,9 +467,12 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
                 Cigar::Operator last_op = Cigar::DELETION;
                 while (last_op == Cigar::DELETION && j) {
                     const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-                    const auto &F_p = std::get<2>(table[j_prev]);
+                    const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
 
-                    last_op = F[pos - trim] == F_p[pos - trim] + config_.gap_extension_penalty
+                    assert(F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
+                        || F[pos - trim] == S_p[pos - trim_p] + config_.gap_opening_penalty);
+
+                    last_op = F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
                         ? Cigar::DELETION
                         : Cigar::MATCH;
 
@@ -478,7 +486,7 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
                     assert(j_prev != static_cast<size_t>(-1));
                     j = j_prev;
                 }
-            } else if (S[pos - trim] != ninf) {
+            } else {
                 // match/mismatch
                 if (offset >= graph_->get_k() - 1) {
                     path.emplace_back(node);
@@ -490,8 +498,6 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
                 --pos;
                 assert(j_prev != static_cast<size_t>(-1));
                 j = j_prev;
-            } else {
-                j = 0;
             }
         }
 
