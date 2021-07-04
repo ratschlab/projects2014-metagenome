@@ -70,6 +70,88 @@ size_t Alignment<NodeType>::trim_offset() {
 }
 
 template <typename NodeType>
+size_t Alignment<NodeType>
+::trim_query_prefix(size_t n, const DeBruijnGraph &graph, const DBGAlignerConfig &config) {
+    size_t clipping = get_clipping() + n;
+
+    auto it = cigar_.begin() + static_cast<bool>(clipping);
+    size_t cigar_offset = 0;
+
+    auto s_it = sequence_.begin();
+    auto node_it = nodes_.begin();
+
+    size_t offset_cutoff = graph.get_k() - 1;
+
+    auto consume_ref = [&]() {
+        assert(s_it != sequence_.end());
+        ++s_it;
+        if (offset_ < offset_cutoff) {
+            ++offset_;
+        } else if (node_it + 1 < nodes_.end()) {
+            ++node_it;
+        } else {
+            *this = Alignment();
+        }
+    };
+
+    while (n) {
+        if (it == cigar_.end()) {
+            *this = Alignment();
+            return 0;
+        }
+
+        switch (it->first) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(s_it != sequence_.end());
+                score_ -= config.get_row(query_[0])[*s_it];
+                query_.remove_prefix(1);
+                --n;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                query_.remove_prefix(1);
+                --n;
+            } break;
+            case Cigar::DELETION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::CLIPPED: {
+                assert(get_end_clipping());
+                assert(it + 1 == cigar_.end());
+                *this = Alignment();
+                return 0;
+            } break;
+        }
+
+        ++cigar_offset;
+        if (cigar_offset == it->second) {
+            ++it;
+            cigar_offset = 0;
+        }
+    }
+
+    nodes_.erase(nodes_.begin(), node_it);
+    sequence_.erase(sequence_.begin(), s_it);
+    it->second -= cigar_offset;
+    cigar_.erase(cigar_.begin(), it);
+
+    assert(is_valid(graph, &config));
+
+    return cigar_offset;
+}
+
+template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                                              std::string_view query_rev_comp) {
     assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
@@ -596,7 +678,10 @@ bool spell_path(const DeBruijnGraph &graph,
         });
 
         if (!next) {
-            std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
+            std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << "\t"
+                      << graph.get_node_sequence(path[i - 1]) << " "
+                      << graph.get_node_sequence(path[i])
+                      << std::endl;
             return false;
         }
 

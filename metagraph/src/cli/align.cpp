@@ -47,6 +47,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
     aligner_config.fraction_of_top = config.alignment_fraction_of_top;
+    aligner_config.chain_alignments = config.alignment_chain;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -304,6 +305,9 @@ std::string format_alignment(std::string_view header,
                 sout += fmt::format("\t{}", path);
             }
         }
+
+        if (config.alignment_chain)
+            sout += fmt::format("\t{}", paths.get_chain_score());
 
         sout += "\n";
     } else {

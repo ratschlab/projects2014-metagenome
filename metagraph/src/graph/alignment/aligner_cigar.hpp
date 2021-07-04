@@ -66,6 +66,9 @@ class Cigar {
         cigar_.insert(it, std::forward<Args>(args)...);
     }
 
+    template <typename... Args>
+    void erase(Args&&... args) { cigar_.erase(std::forward<Args>(args)...); }
+
     value_type& front() { return cigar_.front(); }
     value_type& back() { return cigar_.back(); }
     const value_type& front() const { return cigar_.front(); }

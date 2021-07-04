@@ -31,16 +31,26 @@ class SeedAndExtendAlignerCore {
                              Args&&... args)
           : graph_(graph), config_(config), rc_dbg_(graph_),
             paths_(std::forward<Args>(args)...),
-            aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
+            aggregator_(graph_, paths_.get_query(false), paths_.get_query(true), config_) {}
 
     void flush(const std::function<bool(const DBGAlignment&)> &skip
                    = [](const auto &) { return false; },
                const std::function<bool()> &terminate = []() { return false; }) {
-        aggregator_.call_alignments([&](auto&& alignment) {
-            assert(alignment.is_valid(graph_, &config_));
-            if (!skip(alignment))
-                paths_.emplace_back(std::move(alignment));
-        }, terminate);
+        if (config_.chain_alignments) {
+            aggregator_.call_alignment_chains([&](std::vector<DBGAlignment>&& chain, score_t score) {
+                for (DBGAlignment &path : chain) {
+                    paths_.emplace_back(std::move(path));
+                }
+
+                paths_.set_chain_score(score);
+            });
+        } else {
+            aggregator_.call_alignments([&](DBGAlignment&& alignment) {
+                assert(alignment.is_valid(graph_, &config_));
+                if (!skip(alignment))
+                    paths_.emplace_back(std::move(alignment));
+            }, terminate);
+        }
     }
 
     DBGQueryAlignment& get_paths() { return paths_; }
@@ -180,7 +190,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             callback(std::move(seed));
         }
 
-        for (auto&& extension : extensions) {
+        for (DBGAlignment &extension : extensions) {
             DEBUG_LOG("Alignment (extension): {}", extension);
             callback(std::move(extension));
         }

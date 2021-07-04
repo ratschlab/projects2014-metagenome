@@ -122,6 +122,8 @@ class Alignment {
 
     size_t trim_offset();
 
+    size_t trim_query_prefix(size_t n, const DeBruijnGraph &graph, const DBGAlignerConfig &config);
+
     void reverse_complement(const DeBruijnGraph &graph,
                             std::string_view query_rev_comp);
 
@@ -232,6 +234,7 @@ struct LocalAlignmentGreater {
 template <typename NodeType = uint64_t>
 class QueryAlignment {
   public:
+    typedef typename Alignment<NodeType>::score_t score_t;
     typedef typename std::vector<Alignment<NodeType>>::iterator iterator;
     typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
 
@@ -282,10 +285,14 @@ class QueryAlignment {
         return alignments_.erase(begin, end);
     }
 
+    score_t get_chain_score() const { return chain_score_; }
+    void set_chain_score(score_t score) { chain_score_ = score; }
+
   private:
     std::shared_ptr<std::string> query_;
     std::shared_ptr<std::string> query_rc_;
     std::vector<Alignment<NodeType>> alignments_;
+    score_t chain_score_ = 0;
 };
 
 } // namespace align
