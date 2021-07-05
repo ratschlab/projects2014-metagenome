@@ -236,13 +236,18 @@ void update_column(size_t prev_end,
     __m128i j_v = _mm_set_epi32(3, 2, 1, 0);
     for (size_t j = 0; j < prev_end; j += 4) {
         // match = j ? S_prev_v[j - 1] + profile_scores[j] : ninf;
-        __m128i match = _mm_add_epi32(
-            _mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
-            _mm_loadu_si128((__m128i*)&profile_scores[j])
-        );
-
-        if (!j)
+        __m128i match;
+        if (j) {
+            match = _mm_add_epi32(
+                _mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
+                _mm_loadu_si128((__m128i*)&profile_scores[j])
+            );
+        } else {
+            // rotate elements to the right, then insert ninf in first cell
+            match = _mm_shuffle_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j]), 0b10010000);
+            match = _mm_add_epi32(match, _mm_loadu_si128((__m128i*)&profile_scores[j]));
             match = _mm_insert_epi32(match, ninf, 0);
+        }
 
         // del_score = std::max(del_open, del_extend);
         __m128i del_score = _mm_max_epi32(
