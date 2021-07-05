@@ -118,15 +118,13 @@ void ISeedAndExtendAligner<AlignmentCompare>
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                 || config_.forward_and_reverse_complement) {
-            assert(!is_reverse_complement);
-
             std::vector<node_index> nodes_rc(nodes);
             std::string dummy(query);
             reverse_complement_seq_path(graph_, dummy, nodes_rc);
-            assert(dummy == paths.get_query(true));
+            assert(dummy == paths.get_query(!is_reverse_complement));
             assert(nodes_rc.size() == nodes.size());
 
-            std::string_view reverse = paths.get_query(true);
+            std::string_view reverse = paths.get_query(!is_reverse_complement);
 
             auto seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
             auto extender_rc = build_extender(reverse, core.get_aggregator());
@@ -230,8 +228,9 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
                     if (path.get_score() >= min_path_score) {
                         if (is_reversible(path)) {
-                            auto out_path = path;
+                            DBGAlignment out_path = path;
                             out_path.reverse_complement(graph_, query_rc);
+                            assert(out_path.size());
                             alignment_callback(std::move(out_path));
                         } else {
                             alignment_callback(DBGAlignment(path));
@@ -241,8 +240,9 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                     if (!path.get_clipping() || path.get_offset())
                         return;
 
-                    auto rev = path;
+                    DBGAlignment rev = path;
                     rev.reverse_complement(rc_graph, query_rc);
+                    assert(rev.is_valid(rc_graph, &config_));
 
                     if (rev.empty()) {
                         DEBUG_LOG("This local alignment cannot be reversed, skipping");
@@ -291,6 +291,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                 [&](DBGAlignment&& path) {
                     if (use_rcdbg || is_reversible(path)) {
                         path.reverse_complement(rc_graph, query);
+                        if (path.empty())
+                            return;
                     }
 
                     assert(path.is_valid(graph_, &config_));

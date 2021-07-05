@@ -424,7 +424,7 @@ std::vector<Alignment<NodeType>> backtrack(const Table &table,
             extension.extend_query_begin(query_.data());
             extension.extend_query_end(query_.data() + query_.size());
 
-            return std::make_pair(extension, trace);
+            return std::make_pair(std::move(extension), std::move(trace));
         };
 
         while (j) {
