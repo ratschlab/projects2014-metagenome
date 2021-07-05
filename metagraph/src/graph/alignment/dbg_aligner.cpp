@@ -125,7 +125,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, core.get_aggregator());
 
-        size_t num_explored_nodes = 0;
+        double num_explored_nodes = 0;
 
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -157,9 +157,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
         core.flush();
 
         common::logger->trace(
-            "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
+            "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
             header, query.size(), num_explored_nodes,
-            static_cast<double>(num_explored_nodes) / nodes.size()
+            num_explored_nodes / nodes.size(),
+            core.get_aggregator().num_targets(),
+            num_explored_nodes / nodes.size() / core.get_aggregator().num_targets()
         );
 
         callback(header, std::move(paths));
@@ -345,12 +347,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator_.add_alignment(std::move(alignment));
         },
-        [&](const DBGAlignment &seed) {
-            return std::max(
-                aggregator_.get_min_path_score(seed),
-                static_cast<score_t>(aggregator_.get_max_path_score() * config_.fraction_of_top)
-            );
-        }
+        [&](const DBGAlignment &seed) { return aggregator_.get_min_path_score(seed); }
     );
 }
 

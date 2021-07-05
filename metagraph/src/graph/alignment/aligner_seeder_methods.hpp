@@ -121,8 +121,8 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> get_seeds() const override;
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 
+    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 };
 
 } // namespace align

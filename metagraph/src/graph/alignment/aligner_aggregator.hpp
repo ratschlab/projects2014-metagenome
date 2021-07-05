@@ -14,13 +14,22 @@ namespace align {
 
 template <typename NodeType, class AlignmentCompare>
 class AlignmentAggregator {
+    struct SharedPtrCmp {
+        bool operator()(const std::shared_ptr<Alignment<NodeType>> &a,
+                        const std::shared_ptr<Alignment<NodeType>> &b) const {
+            return base_cmp_(*a, *b);
+        }
+
+        AlignmentCompare base_cmp_;
+    };
+
   public:
     typedef Alignment<NodeType> DBGAlignment;
     typedef std::vector<Alignment<NodeType>> Chain;
     typedef typename DBGAlignment::score_t score_t;
-    typedef boost::container::priority_deque<DBGAlignment,
-                                             std::vector<DBGAlignment>,
-                                             AlignmentCompare> PathQueue;
+    typedef boost::container::priority_deque<std::shared_ptr<DBGAlignment>,
+                                             std::vector<std::shared_ptr<DBGAlignment>>,
+                                             SharedPtrCmp> PathQueue;
 
     AlignmentAggregator(const DeBruijnGraph &graph,
                         std::string_view query,
@@ -32,15 +41,18 @@ class AlignmentAggregator {
 
     void add_alignment(DBGAlignment&& alignment);
 
-    score_t get_min_path_score() const;
-    score_t get_max_path_score() const;
+    score_t get_min_path_score(const Vector<uint64_t> &targets) const;
+    score_t get_max_path_score(const Vector<uint64_t> &targets) const;
 
-    score_t get_min_path_score(const DBGAlignment &) const {
-        return get_min_path_score();
+    score_t get_min_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const;
+    score_t get_max_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const;
+
+    score_t get_min_path_score(const DBGAlignment &seed) const {
+        return get_min_path_score(seed.target_columns);
     }
 
-    score_t get_max_path_score(const DBGAlignment &) const {
-        return get_max_path_score();
+    score_t get_max_path_score(const DBGAlignment &seed) const {
+        return get_max_path_score(seed.target_columns);
     }
 
 
@@ -62,58 +74,176 @@ class AlignmentAggregator {
                               std::vector<score_t> &best_score,
                               const std::function<void(Chain&&, score_t)> &callback);
 
-    size_t size() const { return path_queue_.size(); }
+    size_t size() const {
+        size_t size = 0;
+        for (const auto &[target, queue] : path_queue_)
+            size += queue.size();
+
+        return size;
+    }
+
+    size_t num_targets() const { return path_queue_.size(); }
 
     bool empty() const { return path_queue_.empty(); }
 
+    VectorMap<uint64_t, PathQueue>& data() { return path_queue_; }
+
     void clear() { path_queue_.clear(); }
+
+    std::string_view get_query(bool is_reverse_complement) const {
+        return is_reverse_complement ? rc_query_ : query_;
+    }
 
   private:
     std::string_view query_;
     std::string_view rc_query_;
     const DBGAlignerConfig &config_;
     const DeBruijnGraph &graph_;
-    PathQueue path_queue_;
-    AlignmentCompare cmp_;
+    VectorMap<uint64_t, PathQueue> path_queue_;
+    SharedPtrCmp cmp_;
 };
 
 
 template <typename NodeType, class AlignmentCompare>
 inline void AlignmentAggregator<NodeType, AlignmentCompare>
 ::add_alignment(DBGAlignment&& alignment) {
-    if (std::find(path_queue_.begin(), path_queue_.end(), alignment) != path_queue_.end())
-        return;
+    auto packaged_alignment = std::make_shared<DBGAlignment>(std::move(alignment));
 
-    if (config_.chain_alignments || path_queue_.size() < config_.num_alternative_paths) {
-        path_queue_.emplace(std::move(alignment));
-    } else if (!cmp_(alignment, path_queue_.minimum())) {
-        path_queue_.update(path_queue_.begin(), std::move(alignment));
+    auto add_to_target = [&](uint64_t target) {
+        auto &cur_queue = path_queue_[target];
+
+        for (const auto &aln : cur_queue) {
+            if (*packaged_alignment == *aln)
+                return;
+        }
+
+        if (config_.chain_alignments || cur_queue.size() < config_.num_alternative_paths) {
+            cur_queue.emplace(packaged_alignment);
+        } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
+            cur_queue.update(cur_queue.begin(), packaged_alignment);
+        }
+    };
+
+    add_to_target(std::numeric_limits<uint64_t>::max());
+    std::for_each(packaged_alignment->target_columns.begin(),
+                  packaged_alignment->target_columns.end(),
+                  add_to_target);
+}
+
+template <typename NodeType, class AlignmentCompare>
+inline auto AlignmentAggregator<NodeType, AlignmentCompare>
+::get_min_path_score(const Vector<uint64_t> &targets) const -> score_t {
+    score_t global_min = !config_.chain_alignments
+        ? get_max_path_score() * config_.fraction_of_top
+        : std::numeric_limits<score_t>::min();
+
+    if (targets.empty())
+        return std::max(global_min, get_min_path_score());
+
+    score_t min_score = std::numeric_limits<score_t>::max();
+    for (uint64_t target : targets) {
+        if (min_score < global_min)
+            break;
+
+        min_score = std::min(min_score, get_min_path_score(target));
     }
+
+    return std::max(global_min, min_score);
 }
 
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
-::get_min_path_score() const -> score_t {
-    return config_.chain_alignments || path_queue_.size() < config_.num_alternative_paths
+::get_max_path_score(const Vector<uint64_t> &targets) const -> score_t {
+    if (targets.empty())
+        return get_max_path_score();
+
+    score_t max_score = std::numeric_limits<score_t>::min();
+    for (uint64_t target : targets) {
+        max_score = std::max(max_score, get_max_path_score(target));
+    }
+
+    return max_score;
+}
+
+template <typename NodeType, class AlignmentCompare>
+inline auto AlignmentAggregator<NodeType, AlignmentCompare>
+::get_min_path_score(uint64_t target) const -> score_t {
+    auto find = path_queue_.find(target);
+    return config_.chain_alignments || find == path_queue_.end() || find->second.size() < config_.num_alternative_paths
         ? config_.min_path_score
-        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.fraction_of_top),
-                   path_queue_.minimum().get_score());
+        : find->second.minimum()->get_score();
 }
 
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
-::get_max_path_score() const -> score_t {
-    return path_queue_.size() ? path_queue_.maximum().get_score() : config_.min_path_score;
+::get_max_path_score(uint64_t target) const -> score_t {
+    auto find = path_queue_.find(target);
+    return find == path_queue_.end() ? config_.min_path_score
+                                     : find->second.maximum()->get_score();
 }
 
 template <typename NodeType, class AlignmentCompare>
 inline void AlignmentAggregator<NodeType, AlignmentCompare>
 ::call_alignments(const std::function<void(DBGAlignment&&)> &callback,
                   const std::function<bool()> &terminate) {
-    while (!terminate() && path_queue_.size()) {
-        callback(DBGAlignment(path_queue_.maximum()));
-        path_queue_.pop_maximum();
+    typedef std::pair<uint64_t, PathQueue> queue_value;
+    auto queues = const_cast<std::vector<queue_value>&&>(path_queue_.values_container());
+
+    if (queues.empty())
+        return;
+
+    auto cmp = [this](const queue_value &a, const queue_value &b) {
+        if (b.second.empty())
+            return false;
+
+        if (a.second.empty() || cmp_(a.second.maximum(), b.second.maximum()))
+            return true;
+
+        if (cmp_(b.second.maximum(), a.second.maximum()))
+            return false;
+
+        return a.second.maximum().get() < b.second.maximum().get();
+    };
+
+    std::make_heap(queues.begin(), queues.end(), cmp);
+
+    auto begin = queues.begin();
+    auto end = queues.end();
+    std::shared_ptr<DBGAlignment> last_alignment;
+    while (!terminate() && queues.size() && queues[0].second.size()) {
+        if (queues[0].second.maximum().get() != last_alignment.get()) {
+            if (last_alignment) {
+                assert(last_alignment->size());
+                callback(std::move(*last_alignment));
+                *last_alignment = DBGAlignment();
+            }
+
+            last_alignment = queues[0].second.maximum();
+        }
+
+        queues[0].second.pop_maximum();
+        std::pop_heap(queues.begin(), queues.end(), cmp);
+        if (queues.back().second.empty()) {
+            queues.pop_back();
+            if (queues.empty())
+                break;
+
+            begin = queues.begin();
+            end = queues.end();
+        }
+
+        if (--end == begin && begin->second.size()) {
+            end = queues.end();
+            std::make_heap(begin, end, cmp);
+        }
     }
+
+    if (last_alignment) {
+        assert(last_alignment->size());
+        callback(std::move(*last_alignment));
+    }
+
+    path_queue_.clear();
 }
 
 template <typename NodeType, class AlignmentCompare>
@@ -123,9 +253,13 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     if (path_queue_.empty() || terminate())
         return;
 
+    const auto &all_queue_ = path_queue_.find(std::numeric_limits<uint64_t>::max())->second;
+    if (all_queue_.empty())
+        return;
+
     std::vector<DBGAlignment> alignments[2];
-    for (const auto &alignment : path_queue_) {
-        alignments[alignment.get_orientation()].push_back(alignment);
+    for (const auto &alignment : all_queue_) {
+        alignments[alignment->get_orientation()].push_back(*alignment);
     }
 
     if (alignments[0].empty() && alignments[1].empty())
@@ -218,6 +352,16 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
+        Vector<uint64_t> target_columns;
+        if (it->target_columns.size()) {
+            std::set_intersection(it->target_columns.begin(), it->target_columns.end(),
+                                  chain.back().target_columns.begin(),
+                                  chain.back().target_columns.end(),
+                                  std::back_inserter(target_columns));
+            if (target_columns.empty())
+                continue;
+        }
+
         std::vector<DBGAlignment> next_chain;
         score_t next_score = 0;
 
@@ -237,6 +381,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 best_score[next_end - query.data()] = next_score;
                 next_chain = chain;
                 next_chain.push_back(*it);
+                next_chain.back().target_columns = std::move(target_columns);
             }
         } else {
             // alignments overlap
@@ -287,6 +432,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                     next_chain.back().trim_end_clipping();
                     next_chain.back().append(std::move(aln));
                     assert(next_chain.back().is_valid(graph_, &config_));
+                    next_chain.back().target_columns = std::move(target_columns);
                 }
             } else {
                 // they can't be joined since the overlap is too small
@@ -300,6 +446,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                     aln.trim_offset();
                     aln.extend_query_begin(query.data());
                     next_chain.emplace_back(std::move(aln));
+                    next_chain.back().target_columns = std::move(target_columns);
                 }
             }
 
