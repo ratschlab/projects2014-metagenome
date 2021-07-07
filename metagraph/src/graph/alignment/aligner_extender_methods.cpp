@@ -207,6 +207,7 @@ void update_column(size_t prev_end,
                    const score_t *S_prev_v,
                    const score_t *F_prev_v,
                    ScoreVec &S_v,
+                   ScoreVec &E_v,
                    ScoreVec &F_v,
                    const score_t *profile_scores,
                    score_t xdrop_cutoff,
@@ -214,18 +215,17 @@ void update_column(size_t prev_end,
 #ifndef __SSE4_1__
     for (size_t j = 0; j < prev_end; ++j) {
         score_t match = j ? (S_prev_v[j - 1] + profile_scores[j]) : ninf;
-        score_t del_score = std::max(
-            S_prev_v[j] + config_.gap_opening_penalty,
-            F_prev_v[j] + config_.gap_extension_penalty
-        );
-
-        if (del_score >= xdrop_cutoff)
-            F_v[j] = del_score;
+        F_v[j] = std::max(S_prev_v[j] + config_.gap_opening_penalty,
+                          F_prev_v[j] + config_.gap_extension_penalty);
 
         match = std::max(del_score, match);
 
-        if (match >= xdrop_cutoff)
+        if (match >= xdrop_cutoff) {
             S_v[j] = match;
+            score_t ins_score = match + config_.gap_opening_penalty;
+            if (j + 1 < prev_end)
+                E_v[j + 1] = ins_score;
+        }
     }
 #else
     const __m128i gap_open = _mm_set1_epi32(config_.gap_opening_penalty);
@@ -238,10 +238,8 @@ void update_column(size_t prev_end,
         // match = j ? S_prev_v[j - 1] + profile_scores[j] : ninf;
         __m128i match;
         if (j) {
-            match = _mm_add_epi32(
-                _mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
-                _mm_loadu_si128((__m128i*)&profile_scores[j])
-            );
+            match = _mm_add_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
+                                  _mm_loadu_si128((__m128i*)&profile_scores[j]));
         } else {
             // rotate elements to the right, then insert ninf in first cell
             match = _mm_shuffle_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j]), 0b10010000);
@@ -255,25 +253,31 @@ void update_column(size_t prev_end,
             _mm_add_epi32(_mm_loadu_si128((__m128i*)&F_prev_v[j]), gap_extend)
         );
 
-        // j < prev_end
-        __m128i bound = _mm_cmpgt_epi32(prev_end_v, j_v);
-        j_v = _mm_add_epi32(j_v, _mm_set1_epi32(4));
-
-        // if (del_score >= xdrop_cutoff) F_v[j] = del_score
-        __m128i del_mask = _mm_cmpgt_epi32(del_score, xdrop_v);
-        del_mask = _mm_and_si128(del_mask, bound);
-        del_score = _mm_blendv_epi8(ninf_v, del_score, del_mask);
+        // F_v[j] = del_score
         _mm_store_si128((__m128i*)&F_v[j], del_score);
 
         // match = max(match, del_score)
         match = _mm_max_epi32(match, del_score);
 
-        // if (match >= xdrop_cutoff) S_v[j] = match
+        // match >= xdrop_cutoff
         __m128i mask = _mm_cmpgt_epi32(match, xdrop_v);
+
+        // j < prev_end
+        __m128i bound = _mm_cmpgt_epi32(prev_end_v, j_v);
+        j_v = _mm_add_epi32(j_v, _mm_set1_epi32(4));
         mask = _mm_and_si128(mask, bound);
         match = _mm_blendv_epi8(ninf_v, match, mask);
+
+        // S_v[j] = match
         _mm_store_si128((__m128i*)&S_v[j], match);
+
+        // ins_open = S[j] + gap_open
+        __m128i ins_open = _mm_add_epi32(match, gap_open);
+
+        // E_v[j + 1] = ins_open
+        _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open);
     }
+
 #endif
 
     if (S_v.size() > prev_end) {
@@ -291,16 +295,11 @@ void update_ins(ScoreVec &S,
                 const DBGAlignerConfig &config_) {
     // update insertion scores
     // elements are dependent on the previous one, so this can't be vectorized easily
+    // this takes 20% of the run time when aligning long reads...
     for (size_t j = 1; j < S.size(); ++j) {
-        score_t ins_score = std::max(
-            S[j - 1] + config_.gap_opening_penalty,
-            E[j - 1] + config_.gap_extension_penalty
-        );
-
-        if (ins_score >= xdrop_cutoff) {
-            E[j] = ins_score;
-            S[j] = std::max(S[j], ins_score);
-        }
+        E[j] = std::max(E[j - 1] + config_.gap_extension_penalty, E[j]);
+        if (E[j] >= xdrop_cutoff)
+            S[j] = std::max(S[j], E[j]);
     }
 }
 
@@ -703,7 +702,7 @@ auto DefaultColumnExtender<NodeType>
                 update_column(prev_end - trim,
                               S_prev.data() + trim - trim_prev,
                               F_prev.data() + trim - trim_prev,
-                              S, F,
+                              S, E, F,
                               profile_score_[c].data() + start + trim,
                               xdrop_cutoff, config_);
 
