@@ -25,7 +25,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
     DBGSuccinctCached(const DBGSuccinct &dbg, size_t cache_size = 1000)
           : graph_(dbg), boss_(graph_.get_boss()),
             bwd_first_cache_(cache_size),
-            decoded_cache_(cache_size) {}
+            decoded_cache_(cache_size * dbg.alphabet().size()) {}
 
     DBGSuccinctCached(const DeBruijnGraph &graph, size_t cache_size = 1000)
           : DBGSuccinctCached(dynamic_cast<const DBGSuccinct&>(graph), cache_size) {}
@@ -41,17 +41,23 @@ class DBGSuccinctCached : public DeBruijnGraph {
     }
 
     inline TAlphabet get_first_value(edge_index i) const {
+        TAlphabet c;
+        edge_index first;
+
         if (auto fetch = bwd_first_cache_.TryGet(i)) {
-            bwd_first_cache_.Put(boss_.bwd(i), boss_.bwd(*fetch));
-
-            return boss_.get_W(*fetch) % boss_.alph_size;
-
+            c = boss_.get_node_last_value(*fetch);
+            first = *fetch;
         } else {
-            auto [c, first] = boss_.get_minus_k_value(i, get_k() - 2);
+            std::tie(c, first) = boss_.get_minus_k_value(i, get_k() - 2);
             bwd_first_cache_.Put(i, first);
-            bwd_first_cache_.Put(boss_.bwd(i), boss_.bwd(first));
-            return c;
         }
+
+        edge_index bwd_i = boss_.bwd(i);
+        auto fetch_bwd = bwd_first_cache_.TryGet(bwd_i);
+        if (!fetch_bwd)
+            bwd_first_cache_.Put(bwd_i, boss_.bwd(first));
+
+        return c;
     }
 
     virtual std::string get_node_sequence(node_index node) const override final {
