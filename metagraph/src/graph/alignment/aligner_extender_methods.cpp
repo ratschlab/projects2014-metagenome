@@ -11,13 +11,11 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-typedef DBGAlignerConfig::score_t score_t;
+using score_t = DBGAlignerConfig::score_t;
 constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;
-
-#define WRAP_MEMBER(x) [this](auto&&... args) { return x(std::forward<decltype(args)>(args)...); }
 
 
 template <typename NodeType>
@@ -27,10 +25,11 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
       : SeedFilteringExtender<NodeType>(query),
         graph_(&graph), config_(config), query_(query) {
     assert(config_.check_config_scores());
+
+    // compute exact-match scores for all suffixes of the query
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
-    std::transform(query_.begin(), query_.end(),
-                   partial_sums_.begin(),
+    std::transform(query_.begin(), query_.end(), partial_sums_.begin(),
                    [&](char c) { return config_.get_row(c)[c]; });
 
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
@@ -38,6 +37,8 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     assert(config_.get_row(query_.back())[query_.back()] == partial_sums_.back());
     partial_sums_.push_back(0);
 
+    // precompute profiles to store match/mismatch scores and Cigar::Operators
+    // in contiguous arrays
     for (char c : graph_->alphabet()) {
         auto &p_score_row = profile_score_.emplace(c, query_.size() + kPadding).first.value();
         auto &p_op_row = profile_op_.emplace(c, query_.size() + kPadding).first.value();
@@ -45,8 +46,8 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
         const auto &row = config_.get_row(c);
         const auto &op_row = kCharToOp[c];
 
-        // the first cell in a DP table row is one position before the last matched
-        // character, so we need to shift the indices of profile_score_ and profile_op_
+        // the first cell in a DP table row is one position before the first character,
+        // so we need to shift the indices of profile_score_ and profile_op_
         std::transform(query_.begin(), query_.end(), p_score_row.begin() + 1,
                        [&row](char q) { return row[q]; });
 
@@ -80,18 +81,6 @@ bool SeedFilteringExtender<NodeType>::set_seed(const DBGAlignment &seed) {
     }
 
     return seed_;
-}
-
-template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::process_extension(DBGAlignment&& extension,
-                    const std::vector<size_t> &trace,
-                    tsl::hopscotch_set<size_t> &prev_starts,
-                    score_t min_path_score,
-                    const std::function<void(DBGAlignment&&)> &callback) {
-    prev_starts.insert(trace.begin(), trace.end());
-    if (extension.get_score() >= min_path_score)
-        callback(std::move(extension));
 }
 
 template <typename NodeType>
@@ -202,13 +191,12 @@ bool SeedFilteringExtender<NodeType>::filter_nodes(node_index node,
     }
 }
 
-template <class ScoreVec>
 void update_column(size_t prev_end,
                    const score_t *S_prev_v,
                    const score_t *F_prev_v,
-                   ScoreVec &S_v,
-                   ScoreVec &E_v,
-                   ScoreVec &F_v,
+                   AlignedVector<score_t> &S_v,
+                   AlignedVector<score_t> &E_v,
+                   AlignedVector<score_t> &F_v,
                    const score_t *profile_scores,
                    score_t xdrop_cutoff,
                    const DBGAlignerConfig &config_) {
@@ -288,9 +276,8 @@ void update_column(size_t prev_end,
     }
 }
 
-template <class ScoreVec>
-void update_ins(ScoreVec &S,
-                ScoreVec &E,
+void update_ins(AlignedVector<score_t> &S,
+                AlignedVector<score_t> &E,
                 score_t xdrop_cutoff,
                 const DBGAlignerConfig &config_) {
     // update insertion scores
@@ -303,6 +290,7 @@ void update_ins(ScoreVec &S,
             S[j] = std::max(S[j], E[j]);
     }
 #else
+    // first update the best score vector with insert open penalties
     const __m128i xdrop_v = _mm_set1_epi32(xdrop_cutoff - 1);
     const __m128i ninf_v = _mm_set1_epi32(ninf);
     for (size_t j = 0; j < S.size(); j += 4) {
@@ -313,6 +301,7 @@ void update_ins(ScoreVec &S,
         _mm_store_si128((__m128i*)&S[j], ins_open);
     }
 
+    // then compute insert extension penalties
     for (size_t j = 1; j < S.size(); ++j) {
         score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
         if (ins_extend > std::max(E[j], xdrop_cutoff - 1)) {
@@ -323,10 +312,10 @@ void update_ins(ScoreVec &S,
 #endif
 }
 
-template <class ScoreVec>
-void extend_ins(ScoreVec &S,
-                ScoreVec &E,
-                ScoreVec &F,
+// add insertions to the end of the array until the score drops too low
+void extend_ins(AlignedVector<score_t> &S,
+                AlignedVector<score_t> &E,
+                AlignedVector<score_t> &F,
                 size_t max_size,
                 score_t xdrop_cutoff,
                 const DBGAlignerConfig &config_) {
@@ -346,206 +335,6 @@ void extend_ins(ScoreVec &S,
     }
 }
 
-template <typename NodeType, class Table, class Skipper, class Processor, class ProfileScores, class ProfileOps>
-std::vector<Alignment<NodeType>> backtrack(const Table &table,
-                                           const Skipper &skip_backtrack_start,
-                                           const Processor &process_extension,
-                                           const DeBruijnGraph *graph_,
-                                           const DBGAlignerConfig &config_,
-                                           const ProfileScores &profile_scores,
-                                           const ProfileOps &profile_ops,
-                                           score_t min_path_score,
-                                           const Alignment<NodeType> &seed,
-                                           std::string_view query_,
-                                           std::string_view window) {
-    typedef Alignment<NodeType> DBGAlignment;
-    std::vector<DBGAlignment> extensions;
-    tsl::hopscotch_set<size_t> prev_starts;
-
-    size_t seed_clipping = seed.get_clipping();
-    size_t seed_offset = seed.get_offset();
-    bool orientation = seed.get_orientation();
-
-    std::vector<size_t> indices;
-    indices.reserve(table.size());
-    for (size_t i = 1; i < table.size(); ++i) {
-        const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[i];
-        const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
-
-        if (max_pos < trim_p + 1)
-            continue;
-
-        size_t pos = max_pos - trim;
-        size_t pos_p = max_pos - trim_p - 1;
-        if (S[pos] >= min_path_score
-                && offset >= graph_->get_k() - 1
-                && S[pos] == S_p[pos_p] + profile_scores.find(c)->second[seed_clipping + max_pos]
-                && profile_ops.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
-            indices.emplace_back(i);
-        }
-    }
-
-    std::sort(indices.begin(), indices.end(), [&table](size_t i, size_t j) {
-        const auto &[S_a, E_a, F_a, node_a, j_prev_a, c_a, offset_a, max_pos_a, trim_a] = table[i];
-        const auto &[S_b, E_b, F_b, node_b, j_prev_b, c_b, offset_b, max_pos_b, trim_b] = table[j];
-        ssize_t off_diag_a = std::abs(static_cast<ssize_t>(max_pos_a) - static_cast<ssize_t>(offset_a));
-        ssize_t off_diag_b = std::abs(static_cast<ssize_t>(max_pos_b) - static_cast<ssize_t>(offset_b));
-        return std::make_tuple(S_a[max_pos_a - trim_a], off_diag_b, j)
-            > std::make_tuple(S_b[max_pos_b - trim_b], off_diag_a, i);
-    });
-
-    for (size_t i = 0; i < indices.size(); ++i) {
-        if (skip_backtrack_start(extensions))
-            break;
-
-        size_t j = indices[i];
-        if (!prev_starts.emplace(j).second)
-            continue;
-
-        std::vector<DeBruijnGraph::node_index> path;
-        std::vector<size_t> trace;
-        Cigar ops;
-        std::string seq;
-
-        size_t pos = 0;
-        size_t end_pos = 0;
-        score_t score = 0;
-        size_t align_offset = seed_offset;
-
-        {
-            const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-            assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
-
-            pos = max_pos;
-            end_pos = max_pos;
-            score = S[pos - trim];
-        }
-
-        auto get_extension = [&](Cigar cigar,
-                                 std::vector<size_t> trace,
-                                 std::vector<NodeType> final_path,
-                                 std::string match) {
-            assert(trace.size() == final_path.size());
-            assert(final_path.size());
-            cigar.append(Cigar::CLIPPED, pos);
-
-            std::reverse(cigar.begin(), cigar.end());
-            std::reverse(final_path.begin(), final_path.end());
-            std::reverse(match.begin(), match.end());
-
-            Alignment<NodeType> extension(
-                window.substr(pos, end_pos - pos),
-                std::move(final_path), std::move(match), score, std::move(cigar),
-                0, orientation, align_offset
-            );
-
-            trace.erase(trace.end() - extension.trim_offset(), trace.end());
-            extension.extend_query_begin(query_.data());
-            extension.extend_query_end(query_.data() + query_.size());
-
-            return std::make_pair(std::move(extension), std::move(trace));
-        };
-
-        while (j) {
-            assert(j != static_cast<size_t>(-1));
-            const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-            const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
-
-            assert(pos >= trim);
-            assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
-            assert(c == graph_->get_node_sequence(node)[std::min(graph_->get_k() - 1, offset)]);
-
-            if (S[pos - trim] == 0 && ops.size() && (ops.back().first == Cigar::MATCH || ops.back().first == Cigar::MISMATCH)) {
-                auto [extension, trimmed_trace] = get_extension(ops, trace, path, seq);
-                process_extension(std::move(extension), std::move(trimmed_trace),
-                                  prev_starts, min_path_score,
-                                  [&](DBGAlignment&& extension) {
-                    extensions.emplace_back(std::move(extension));
-                });
-            }
-
-            align_offset = std::min(offset, graph_->get_k() - 1);
-
-            if (pos == max_pos)
-                prev_starts.emplace(j);
-
-            if (S[pos - trim] == ninf) {
-                j = 0;
-            } else if (pos && pos >= trim_p + 1
-                    && S[pos - trim] == S_p[pos - trim_p - 1]
-                        + profile_scores.find(c)->second[seed_clipping + pos]) {
-                // match/mismatch
-                if (offset >= graph_->get_k() - 1) {
-                    path.emplace_back(node);
-                    trace.emplace_back(j);
-                }
-
-                seq += c;
-                ops.append(profile_ops.find(c)->second[seed_clipping + pos]);
-                --pos;
-                assert(j_prev != static_cast<size_t>(-1));
-                j = j_prev;
-
-            } else if (S[pos - trim] == F[pos - trim] && ops.size() && ops.back().first != Cigar::INSERTION) {
-                // deletion
-                Cigar::Operator last_op = Cigar::DELETION;
-                while (last_op == Cigar::DELETION && j) {
-                    const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-                    const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
-
-                    assert(pos >= trim_p);
-
-                    assert(F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
-                        || F[pos - trim] == S_p[pos - trim_p] + config_.gap_opening_penalty);
-
-                    last_op = F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
-                        ? Cigar::DELETION
-                        : Cigar::MATCH;
-
-                    if (offset >= graph_->get_k() - 1) {
-                        path.emplace_back(node);
-                        trace.emplace_back(j);
-                    }
-
-                    seq += c;
-                    ops.append(Cigar::DELETION);
-                    assert(j_prev != static_cast<size_t>(-1));
-                    j = j_prev;
-                }
-            } else if (pos && S[pos - trim] == E[pos - trim] && ops.size() && ops.back().first != Cigar::DELETION) {
-                // insertion
-                Cigar::Operator last_op = Cigar::INSERTION;
-                while (last_op == Cigar::INSERTION) {
-                    ops.append(last_op);
-
-                    assert(E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
-                        || E[pos - trim] == S[pos - trim - 1] + config_.gap_opening_penalty);
-
-                    last_op = E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
-                        ? Cigar::INSERTION
-                        : Cigar::MATCH;
-
-                    --pos;
-                }
-            } else {
-                assert(false && "One of the above should apply");
-            }
-        }
-
-        if (ops.size() && (ops.back().first == Cigar::MATCH || ops.back().first == Cigar::MISMATCH)) {
-            auto [extension, trimmed_trace]
-                = get_extension(std::move(ops), std::move(trace),
-                                std::move(path), std::move(seq));
-            process_extension(std::move(extension), std::move(trimmed_trace),
-                              prev_starts, min_path_score, [&](DBGAlignment&& extension) {
-                extensions.emplace_back(std::move(extension));
-            });
-        }
-    }
-
-    return extensions;
-}
-
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::call_outgoing(NodeType node,
@@ -557,16 +346,12 @@ void DefaultColumnExtender<NodeType>
     });
 }
 
-template <class Column, typename NodeType>
-Column alloc_column(size_t size,
-                    NodeType node,
-                    size_t i_prev,
-                    char c,
-                    size_t offset,
-                    size_t max_pos,
-                    size_t trim) {
-    Column column;
-    auto &[S, E, F, node_, i_prev_, c_, offset_, max_pos_, trim_] = column;
+// allocate and initialize with padding to ensure that SIMD operations don't
+// read/write out of bounds
+template <class Column, typename... RestArgs>
+Column alloc_column(size_t size, RestArgs... args) {
+    Column column { {}, {}, {}, args... };
+    auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = column;
 
     S.reserve(size + kPadding);
     E.reserve(size + kPadding);
@@ -580,13 +365,6 @@ Column alloc_column(size_t size,
     std::fill(E.data() + E.size(), E.data() + E.capacity(), ninf);
     std::fill(F.data() + F.size(), F.data() + F.capacity(), ninf);
 
-    node_ = node;
-    i_prev_ = i_prev;
-    c_ = c;
-    offset_ = offset;
-    max_pos_ = max_pos;
-    trim_ = trim;
-
     return column;
 }
 
@@ -595,53 +373,44 @@ auto DefaultColumnExtender<NodeType>
 ::extend(score_t min_path_score) -> std::vector<DBGAlignment> {
     assert(this->seed_);
 
-    typedef AlignedVector<score_t> ScoreVec;
-    typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                       NodeType, size_t, char, size_t, size_t, size_t> Column;
-    typedef std::vector<Column> Table;
-    Table table;
+    table.clear();
+    prev_starts.clear();
 
     size_t start = this->seed_->get_clipping();
 
+    // the sequence to align (the suffix of the query starting from the seed)
     std::string_view window(this->seed_->get_query().data(),
                             query_.data() + query_.size() - this->seed_->get_query().data());
 
-    table.emplace_back(alloc_column<Column, NodeType>(
-        window.size() + 1, this->seed_->front(), -1, '\0', this->seed_->get_offset() - 1, 0, 0
-    ));
-    {
-        auto &S = std::get<0>(table.back());
-        std::fill(S.begin(), S.end(), 0);
-    }
+    ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
+
+    // initialize the root of the tree
+    table.emplace_back(alloc_column<Column>(window.size() + 1, this->seed_->front(),
+                                            static_cast<size_t>(-1), '\0', seed_offset, 0, 0));
+    std::fill(std::get<0>(table[0]).begin(), std::get<0>(table[0]).end(), 0);
 
     score_t xdrop_cutoff = std::max(-config_.xdrop, ninf + 1);
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
-    using Ref = std::tuple<score_t,
-                           size_t /* table idx */,
-                           ssize_t /* max pos */,
-                           ssize_t /* offset */>;
-    Ref best_score { 0, 0, 0, this->seed_->get_offset() - 1 };
+    using TableIt = std::tuple<score_t,
+                               ssize_t, /* negative off_diag */
+                               size_t /* table idx */>;
+    TableIt best_score { 0, 0, 0 };
 
-    struct RefCmp {
-        bool operator()(const Ref &a, const Ref &b) const {
-            const auto &[a_score, a_id, a_max_pos, a_offset] = a;
-            const auto &[b_score, b_id, b_max_pos, b_offset] = b;
-            return std::make_tuple(a_score, std::abs(b_max_pos - b_offset), b_id)
-                < std::make_tuple(b_score, std::abs(a_max_pos - a_offset), a_id);
-        }
-    };
-
-    std::priority_queue<Ref, std::vector<Ref>, RefCmp> queue;
+    // node traversal heap
+    std::priority_queue<TableIt> queue;
     queue.emplace(best_score);
 
     assert(partial_sums_.at(start) == config_.match_score(window));
 
     while (queue.size()) {
-        size_t i = std::get<1>(queue.top());
+        size_t i = std::get<2>(queue.top());
         queue.pop();
 
+        // If a node has a single outgoing edge, which has the best score, then
+        // that node is taken without updating the heap. This loop ensures that
+        // that happens
         bool nofork = true;
         while (nofork) {
             nofork = false;
@@ -656,9 +425,11 @@ auto DefaultColumnExtender<NodeType>
                 const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[i];
                 next_offset = offset + 1;
 
+                // if too many nodes have been explored, give up
                 if (static_cast<double>(table.size()) / window.size() >= config_.max_nodes_per_seq_char)
                     continue;
 
+                // determine maximal range within the xdrop score cutoff
                 auto in_range = [xdrop_cutoff](score_t s) { return s >= xdrop_cutoff; };
 
                 prev_begin = std::find_if(S.begin(), S.end(), in_range) - S.begin() + trim;
@@ -667,6 +438,7 @@ auto DefaultColumnExtender<NodeType>
                 if (prev_end <= prev_begin)
                     continue;
 
+                // check if this node can be extended to get a better alignment
                 bool has_extension = false;
                 for (size_t j = prev_begin; j < prev_end; ++j) {
                     assert(partial_sums_.at(start + j) == config_.match_score(window.substr(j)));
@@ -681,12 +453,19 @@ auto DefaultColumnExtender<NodeType>
                 if (!has_extension)
                     continue;
 
+                // Get the next node(s) from the graph. If the current node is
+                // part of the seed, then pick the next node from the seed.
                 if (next_offset - this->seed_->get_offset() < this->seed_->get_sequence().size()) {
                     if (next_offset < graph_->get_k()) {
-                        outgoing.emplace_back(this->seed_->front(), this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]);
+                        outgoing.emplace_back(
+                            this->seed_->front(),
+                            this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
+                        );
                     } else {
-                        outgoing.emplace_back((*this->seed_)[next_offset - graph_->get_k() + 1],
-                                              this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]);
+                        outgoing.emplace_back(
+                            (*this->seed_)[next_offset - graph_->get_k() + 1],
+                            this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
+                        );
                         assert(graph_->traverse(node, outgoing.back().second) == outgoing.back().first);
                     }
                 } else {
@@ -695,20 +474,23 @@ auto DefaultColumnExtender<NodeType>
                 }
             }
 
-            size_t begin = prev_begin;
+            ssize_t begin = prev_begin;
             size_t end = std::min(prev_end, window.size()) + 1;
 
             for (const auto &[next, c] : outgoing) {
                 assert(std::get<0>(best_score) > xdrop_cutoff);
 
-                table.emplace_back(alloc_column<Column, NodeType>(
-                    end - begin, next, i, c, next_offset, begin, begin
+                table.emplace_back(alloc_column<Column>(
+                    end - begin, next, i, c,
+                    static_cast<ssize_t>(next_offset),
+                    begin, begin
                 ));
 
-                const auto &[S_prev, E_prev, F_prev,
-                             node_prev, i_prev, c_prev, offset_prev, max_pos_prev, trim_prev] = table[i];
+                const auto &[S_prev, E_prev, F_prev, node_prev, i_prev, c_prev,
+                             offset_prev, max_pos_prev, trim_prev] = table[i];
 
-                auto &[S, E, F, node_cur, i_cur, c_stored, offset, max_pos, trim] = table.back();
+                auto &[S, E, F, node_cur, i_cur, c_stored, offset, max_pos, trim]
+                    = table.back();
 
                 if (next != node_prev && !trim && !trim_prev)
                     S[0] = S_prev[0];
@@ -717,8 +499,9 @@ auto DefaultColumnExtender<NodeType>
                 assert(node_cur == next);
                 assert(c_stored == c);
                 assert(offset == offset_prev + 1);
-                assert(c == graph_->get_node_sequence(node_cur)[std::min(graph_->get_k() - 1, offset)]);
+                assert(c == graph_->get_node_sequence(node_cur)[std::min(static_cast<ssize_t>(graph_->get_k()) - 1, offset)]);
 
+                // compute column scores
                 update_column(prev_end - trim,
                               S_prev.data() + trim - trim_prev,
                               F_prev.data() + trim - trim_prev,
@@ -727,25 +510,30 @@ auto DefaultColumnExtender<NodeType>
                               xdrop_cutoff, config_);
 
                 update_ins(S, E, xdrop_cutoff, config_);
-
                 extend_ins(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
 
                 assert(max_pos >= trim);
-                assert(max_pos - trim < S.size());
+                assert(static_cast<size_t>(max_pos - trim) < S.size());
 
-                ssize_t s_offset = static_cast<ssize_t>(offset + 1);
-                for (size_t j = 0; j < S.size(); ++j) {
-                    if (std::make_pair(S[j], std::abs(static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(s_offset)))
-                            > std::make_pair(S[max_pos - begin], std::abs(static_cast<ssize_t>(j + begin) - static_cast<ssize_t>(s_offset)))) {
+                // find the maximal scoring position which is closest to the diagonal
+                // TODO: this can be done with SIMD, but it's not a bottleneck
+                ssize_t cur_offset = begin;
+                ssize_t diag_i = offset - seed_offset;
+                for (size_t j = 0; j < S.size(); ++j, ++cur_offset) {
+                    if (std::make_pair(S[j], std::abs(max_pos - diag_i))
+                            > std::make_pair(S[max_pos - begin], std::abs(cur_offset - diag_i))) {
                         max_pos = j + begin;
                     }
                 }
                 assert(max_pos >= trim);
-                assert(max_pos - trim < S.size());
+                assert(static_cast<size_t>(max_pos - trim) < S.size());
 
+                // if the best score in this column is above the xdrop score
+                // then check if the extension can continue
                 score_t max_val = S[max_pos - trim];
                 if (max_val >= xdrop_cutoff) {
-                    Ref next_score { max_val, table.size() - 1, max_pos, offset };
+                    TableIt next_score { max_val, -std::abs(max_pos - diag_i),
+                                         table.size() - 1 };
 
                     if (max_val - xdrop_cutoff > config_.xdrop)
                         xdrop_cutoff = max_val - config_.xdrop;
@@ -768,7 +556,11 @@ auto DefaultColumnExtender<NodeType>
                     assert(s_begin <= s_end);
                     assert(vec_offset + (s_end - s_begin) <= query_.size());
 
+                    // if this node has not been reached by a different
+                    // alignment with a better score, continue
                     if (this->update_seed_filter(next, vec_offset, s_begin, s_end)) {
+                        // if there is only one outgoing edge, which is the best,
+                        // don't update the node traversal heap
                         if (outgoing.size() == 1 && max_val >= std::get<0>(queue.top())) {
                             nofork = true;
                             i = table.size() - 1;
@@ -784,21 +576,182 @@ auto DefaultColumnExtender<NodeType>
         }
     }
 
-    if (table.size()) {
-        init_backtrack();
-        return backtrack<NodeType>(table, WRAP_MEMBER(skip_backtrack_start),
-                                   WRAP_MEMBER(process_extension), graph_, config_,
-                                   profile_score_, profile_op_, min_path_score,
-                                   *this->seed_, query_, window);
-    } else {
-        return {};
-    }
+    return backtrack(min_path_score, window);
 }
 
 template <typename NodeType>
-bool DefaultColumnExtender<NodeType>
-::skip_backtrack_start(const std::vector<DBGAlignment> &extensions) const {
-    return extensions.size() >= config_.num_alternative_paths;
+auto DefaultColumnExtender<NodeType>
+::construct_alignment(Cigar cigar,
+                      size_t clipping,
+                      std::string_view window,
+                      std::vector<NodeType> final_path,
+                      std::string match,
+                      score_t score,
+                      size_t offset) const -> DBGAlignment {
+    assert(final_path.size());
+    cigar.append(Cigar::CLIPPED, clipping);
+
+    std::reverse(cigar.begin(), cigar.end());
+    std::reverse(final_path.begin(), final_path.end());
+    std::reverse(match.begin(), match.end());
+
+    DBGAlignment extension(window, std::move(final_path), std::move(match), score,
+                           std::move(cigar), 0, this->seed_->get_orientation(), offset);
+    assert(extension.is_valid(*this->graph_, &config_));
+
+    extension.trim_offset();
+    extension.extend_query_begin(query_.data());
+    extension.extend_query_end(query_.data() + query_.size());
+
+    assert(extension.is_valid(*this->graph_, &config_));
+
+    return extension;
+}
+
+template <typename NodeType>
+auto DefaultColumnExtender<NodeType>
+::backtrack(score_t min_path_score, std::string_view window) -> std::vector<DBGAlignment> {
+    if (table.empty())
+        return {};
+
+    init_backtrack();
+
+    std::vector<DBGAlignment> extensions;
+
+    size_t seed_clipping = this->seed_->get_clipping();
+    ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
+    ssize_t k_minus_1 = graph_->get_k() - 1;
+
+    std::vector<std::tuple<score_t, ssize_t, size_t>> indices;
+    indices.reserve(table.size());
+    for (size_t i = 1; i < table.size(); ++i) {
+        const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[i];
+        const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+        if (max_pos < trim_p + 1)
+            continue;
+
+        size_t pos = max_pos - trim;
+        size_t pos_p = max_pos - trim_p - 1;
+        if (S[pos] >= min_path_score
+                && offset >= k_minus_1
+                && S[pos] == S_p[pos_p] + profile_score_.find(c)->second[seed_clipping + max_pos]
+                && profile_op_.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
+            indices.emplace_back(-S[pos], std::abs(max_pos - offset + seed_offset), i);
+        }
+    }
+
+    // find highest scoring which is closest to the diagonal
+    std::sort(indices.begin(), indices.end());
+
+    for (const auto &[neg_score, off_diag, j_start] : indices) {
+        if (terminate_backtrack_start(extensions))
+            break;
+
+        if (skip_backtrack_start(j_start))
+            continue;
+
+        std::vector<DeBruijnGraph::node_index> path;
+        std::vector<size_t> trace;
+        Cigar ops;
+        std::string seq;
+        score_t score = -neg_score;
+
+        size_t j = j_start;
+        ssize_t pos = std::get<7>(table[j]);
+        ssize_t end_pos = pos;
+        size_t align_offset = this->seed_->get_offset();
+
+        while (j && !terminate_backtrack()) {
+            assert(j != static_cast<size_t>(-1));
+            const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
+            const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+            assert(pos >= trim);
+            assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
+            assert(c == graph_->get_node_sequence(node)[std::min(k_minus_1, offset)]);
+
+            align_offset = std::min(offset, k_minus_1);
+
+            if (pos == max_pos)
+                prev_starts.emplace(j);
+
+            if (S[pos - trim] == ninf) {
+                j = 0;
+
+            } else if (pos && pos >= trim_p + 1
+                    && S[pos - trim] == S_p[pos - trim_p - 1]
+                        + profile_score_.find(c)->second[seed_clipping + pos]) {
+                // match/mismatch
+                trace.emplace_back(j);
+                if (offset >= k_minus_1)
+                    path.emplace_back(node);
+
+                seq += c;
+                ops.append(profile_op_.find(c)->second[seed_clipping + pos]);
+                --pos;
+                assert(j_prev != static_cast<size_t>(-1));
+                j = j_prev;
+
+            } else if (S[pos - trim] == F[pos - trim] && ops.size() && ops.back().first != Cigar::INSERTION) {
+                // deletion
+                Cigar::Operator last_op = Cigar::DELETION;
+                while (last_op == Cigar::DELETION && j) {
+                    const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
+                    const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+
+                    assert(pos >= trim_p);
+
+                    assert(F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
+                        || F[pos - trim] == S_p[pos - trim_p] + config_.gap_opening_penalty);
+
+                    last_op = F[pos - trim] == F_p[pos - trim_p] + config_.gap_extension_penalty
+                        ? Cigar::DELETION
+                        : Cigar::MATCH;
+
+                    trace.emplace_back(j);
+                    if (offset >= k_minus_1)
+                        path.emplace_back(node);
+
+                    seq += c;
+                    ops.append(Cigar::DELETION);
+                    assert(j_prev != static_cast<size_t>(-1));
+                    j = j_prev;
+                }
+            } else if (pos && S[pos - trim] == E[pos - trim] && ops.size() && ops.back().first != Cigar::DELETION) {
+                // insertion
+                Cigar::Operator last_op = Cigar::INSERTION;
+                while (last_op == Cigar::INSERTION) {
+                    ops.append(last_op);
+
+                    assert(E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
+                        || E[pos - trim] == S[pos - trim - 1] + config_.gap_opening_penalty);
+
+                    last_op = E[pos - trim] == E[pos - trim - 1] + config_.gap_extension_penalty
+                        ? Cigar::INSERTION
+                        : Cigar::MATCH;
+
+                    --pos;
+                }
+#ifndef NDEBUG
+            } else {
+                assert(false && "Failure to backtrack. One of the above should apply");
+#endif
+            }
+
+            if (trace.size() >= this->graph_->get_k()) {
+                const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
+
+                call_alignments(S[pos - trim], score, min_path_score, path, trace, ops,
+                                pos, align_offset, window.substr(pos, end_pos - pos), seq,
+                                [&](DBGAlignment&& alignment) {
+                    extensions.emplace_back(std::move(alignment));
+                });
+            }
+        }
+    }
+
+    return extensions;
 }
 
 template class DefaultColumnExtender<>;

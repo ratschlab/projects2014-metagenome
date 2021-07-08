@@ -30,11 +30,17 @@ class AlignmentAggregator {
 
     void add_alignment(DBGAlignment&& alignment);
 
-    score_t get_min_path_score(const DBGAlignment &seed) const;
-    score_t get_max_path_score(const DBGAlignment &seed) const;
-
     score_t get_min_path_score() const;
     score_t get_max_path_score() const;
+
+    score_t get_min_path_score(const DBGAlignment &) const {
+        return get_min_path_score();
+    }
+
+    score_t get_max_path_score(const DBGAlignment &) const {
+        return get_max_path_score();
+    }
+
 
     const DBGAlignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
@@ -68,18 +74,6 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     } else if (!cmp_(alignment, path_queue_.minimum())) {
         path_queue_.update(path_queue_.begin(), std::move(alignment));
     }
-}
-
-template <typename NodeType, class AlignmentCompare>
-inline auto AlignmentAggregator<NodeType, AlignmentCompare>
-::get_min_path_score(const DBGAlignment &) const -> score_t {
-    return get_min_path_score();
-}
-
-template <typename NodeType, class AlignmentCompare>
-inline auto AlignmentAggregator<NodeType, AlignmentCompare>
-::get_max_path_score(const DBGAlignment &) const -> score_t {
-    return get_max_path_score();
 }
 
 template <typename NodeType, class AlignmentCompare>
