@@ -276,6 +276,8 @@ Config::Config(int argc, char *argv[]) {
             host_address = get_value(i++);
         }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
+        } else if (!strcmp(argv[i], "--label-mask-file")) {
+            label_mask_file = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
@@ -360,18 +362,6 @@ Config::Config(int argc, char *argv[]) {
             print_welcome_message();
             print_usage(argv[0], identity);
             exit(0);
-        } else if (!strcmp(argv[i], "--label-mask-in")) {
-            label_mask_in.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out")) {
-            label_mask_out.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-in-fraction")) {
-            label_mask_in_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
-            label_mask_out_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-other-fraction")) {
-            label_other_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--filter-by-kmer")) {
-            filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--disk-swap")) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
@@ -541,6 +531,12 @@ Config::Config(int argc, char *argv[]) {
     if (identity == ANNOTATE
             && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if ((identity == ASSEMBLE || identity == TRANSFORM)
+            && (infbase_annotators.size() && label_mask_file.empty())) {
+        std::cerr << "Error: annotator passed, but no label mask file provided" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1035,13 +1031,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
-            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
-            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
-            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-file [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
+            fprintf(stderr, "\t                       \t\tSee the README for the specification.\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());

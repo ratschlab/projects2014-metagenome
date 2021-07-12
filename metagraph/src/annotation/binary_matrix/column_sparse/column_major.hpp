@@ -27,6 +27,10 @@ class ColumnMajor : public BinaryMatrix {
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
 
+    void call_columns(const std::vector<Column> &columns,
+                      const std::function<void(Column, const bitmap&)> &callback,
+                      size_t num_threads = 1) const override;
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
