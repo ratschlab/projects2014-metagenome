@@ -29,6 +29,8 @@ class IExtender {
 
     virtual void set_graph(const DeBruijnGraph &graph) = 0;
 
+    virtual size_t num_explored_nodes() const = 0;
+
   protected:
     virtual const DBGAlignment& get_seed() const = 0;
     virtual bool set_seed(const DBGAlignment &seed) = 0;
@@ -48,6 +50,8 @@ class SeedFilteringExtender : public IExtender<NodeType> {
     virtual ~SeedFilteringExtender() {}
 
     virtual void set_graph(const DeBruijnGraph &) override { conv_checker_.clear(); }
+
+    virtual size_t num_explored_nodes() const override { return conv_checker_.size(); }
 
   protected:
     const DBGAlignment *seed_ = nullptr;

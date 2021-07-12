@@ -115,6 +115,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, core.get_aggregator());
 
+        size_t num_explored_nodes = 0;
+
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                 || config_.forward_and_reverse_complement) {
@@ -131,6 +133,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
             core.align_both_directions(*seeder, *seeder_rc, *extender, *extender_rc);
 
+            num_explored_nodes += extender_rc->num_explored_nodes();
+
         } else {
             core.align_one_direction(is_reverse_complement, *seeder, *extender);
         }
@@ -138,7 +142,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
         core.align_one_direction(is_reverse_complement, *seeder, *extender);
 #endif
 
+        num_explored_nodes += extender->num_explored_nodes();
+
         core.flush();
+
+        common::logger->trace(
+            "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
+            header, query.size(), num_explored_nodes,
+            static_cast<double>(num_explored_nodes) / nodes.size()
+        );
 
         callback(header, std::move(paths));
     };
