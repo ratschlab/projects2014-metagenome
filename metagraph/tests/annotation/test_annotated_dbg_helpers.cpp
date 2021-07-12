@@ -4,7 +4,6 @@
 
 #include "annotation/annotation_converters.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -28,8 +27,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels) {
     assert(sequences.size() == labels.size());
-    auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph);
-    uint64_t max_index = canonical ? canonical->get_graph().max_index() : graph->max_index();
+    uint64_t max_index = graph->get_base_graph().max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,
