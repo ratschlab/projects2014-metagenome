@@ -306,9 +306,6 @@ std::string format_alignment(std::string_view header,
             }
         }
 
-        if (config.alignment_chain)
-            sout += fmt::format("\t{}", paths.get_chain_score());
-
         sout += "\n";
     } else {
         Json::StreamWriterBuilder builder;

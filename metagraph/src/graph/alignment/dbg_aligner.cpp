@@ -36,21 +36,11 @@ class SeedAndExtendAlignerCore {
     void flush(const std::function<bool(const DBGAlignment&)> &skip
                    = [](const auto &) { return false; },
                const std::function<bool()> &terminate = []() { return false; }) {
-        if (config_.chain_alignments) {
-            aggregator_.call_alignment_chains([&](std::vector<DBGAlignment>&& chain, score_t score) {
-                for (DBGAlignment &path : chain) {
-                    paths_.emplace_back(std::move(path));
-                }
-
-                paths_.set_chain_score(score);
-            });
-        } else {
-            aggregator_.call_alignments([&](DBGAlignment&& alignment) {
-                assert(alignment.is_valid(graph_, &config_));
-                if (!skip(alignment))
-                    paths_.emplace_back(std::move(alignment));
-            }, terminate);
-        }
+        aggregator_.call_alignments([&](DBGAlignment&& alignment) {
+            assert(alignment.is_valid(graph_, &config_));
+            if (!skip(alignment))
+                paths_.emplace_back(std::move(alignment));
+        }, terminate);
     }
 
     DBGQueryAlignment& get_paths() { return paths_; }
@@ -345,12 +335,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator_.add_alignment(std::move(alignment));
         },
-        [&](const DBGAlignment &seed) {
-            return std::max(
-                aggregator_.get_min_path_score(seed),
-                static_cast<score_t>(aggregator_.get_max_path_score() * config_.fraction_of_top)
-            );
-        }
+        [&](const DBGAlignment &seed) { return aggregator_.get_min_path_score(seed); }
     );
 }
 
