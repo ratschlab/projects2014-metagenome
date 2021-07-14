@@ -18,8 +18,9 @@ class DynamicLabeledGraph {
     typedef VectorSet<Vector<uint64_t>, utils::VectorHash> Storage;
     typedef Storage::const_iterator const_iterator;
 
-    DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
-          : anno_graph_(anno_graph) { targets_set_.emplace(Vector<uint64_t>{}); }
+    DynamicLabeledGraph(const AnnotatedDBG &anno_graph) : anno_graph_(anno_graph) {
+        targets_set_.emplace(); // insert empty vector
+    }
 
     const DeBruijnGraph& get_graph() const { return anno_graph_.get_graph(); }
     const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
@@ -28,6 +29,7 @@ class DynamicLabeledGraph {
     void add_node(node_index node);
     void add_path(const std::vector<node_index> &path, std::string_view spelling);
 
+    // get all sequences coordinates (k-mers) generating the node
     std::vector<size_t> get_coords(node_index node) const;
 
     const_iterator find(node_index node) const {

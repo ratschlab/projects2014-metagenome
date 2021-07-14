@@ -9,14 +9,17 @@
 #include "common/utils/template_utils.hpp"
 #include "common/algorithms.hpp"
 
+
 namespace mtg {
 namespace graph {
 namespace align {
 
+typedef DeBruijnGraph::node_index node_index;
+
 
 bool check_targets(const DeBruijnGraph &graph,
                    const AnnotatedDBG &anno_graph,
-                   const Alignment<DeBruijnGraph::node_index> &path) {
+                   const Alignment<node_index> &path) {
     std::string query = path.get_sequence();
     if (dynamic_cast<const RCDBG*>(&graph))
         ::reverse_complement(query.begin(), query.end());
@@ -36,16 +39,16 @@ bool check_targets(const DeBruijnGraph &graph,
 }
 
 
-void
-process_seq_path(const DeBruijnGraph &graph,
-                 std::string_view query,
-                 const std::vector<DeBruijnGraph::node_index> &query_nodes,
-                 const std::function<void(AnnotatedDBG::row_index, size_t)> &callback) {
+template <class Callback>
+void process_seq_path(const DeBruijnGraph &graph,
+                      std::string_view query,
+                      const std::vector<node_index> &query_nodes,
+                      const Callback &callback) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-    auto run_callback = [&](DeBruijnGraph::node_index node, size_t i) {
+    auto run_callback = [&](node_index node, size_t i) {
         if (!boss || boss->get_W(dbg_succ->kmer_to_boss_index(node)))
             callback(AnnotatedDBG::graph_to_anno_index(node), i);
     };
@@ -82,14 +85,14 @@ process_seq_path(const DeBruijnGraph &graph,
             std::string map_query
                 = graph.get_node_sequence(query_nodes[0]).substr(0, graph.get_k());
             map_query += query.substr(graph.get_k());
-            graph.map_to_nodes(map_query, [&](DeBruijnGraph::node_index node) {
+            graph.map_to_nodes(map_query, [&](node_index node) {
                 if (node != DeBruijnGraph::npos)
                     run_callback(node, i);
 
                 ++i;
             });
         } else {
-            graph.map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
+            graph.map_to_nodes(query, [&](node_index node) {
                 if (node != DeBruijnGraph::npos)
                     run_callback(node, i);
 
