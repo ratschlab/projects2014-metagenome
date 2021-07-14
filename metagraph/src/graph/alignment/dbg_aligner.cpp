@@ -153,6 +153,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
+        size_t num_targets = core.get_aggregator().num_targets();
 
         core.flush();
 
@@ -160,8 +161,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
             "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
             header, query.size(), num_explored_nodes,
             num_explored_nodes / nodes.size(),
-            core.get_aggregator().num_targets(),
-            num_explored_nodes / nodes.size() / core.get_aggregator().num_targets()
+            num_targets,
+            num_explored_nodes / nodes.size() / num_targets
         );
 
         callback(header, std::move(paths));
