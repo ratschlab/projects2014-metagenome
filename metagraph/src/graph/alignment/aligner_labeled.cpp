@@ -6,6 +6,7 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/algorithms.hpp"
 
@@ -53,8 +54,23 @@ void DynamicLabeledGraph::flush() {
     added_nodes_.clear();
 }
 
-std::vector<size_t> DynamicLabeledGraph::get_coords(node_index /* node */) const {
-    return {};
+std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
+    using MIM = annot::matrix::MultiIntMatrix;
+    const auto &multi_int
+        = dynamic_cast<const MIM &>(anno_graph_.get_annotation().get_matrix());
+
+    // TODO: make sure it correctly maps nodes to rows
+    Row row = AnnotatedDBG::graph_to_anno_index(node);
+
+    std::vector<size_t> coordinates;
+
+    for (const auto &[j, tuple] : multi_int.get_row_tuples(row)) {
+        for (uint64_t coord : tuple) {
+            // make sure the offsets are correct (query max_int in multi_int)
+            coordinates.push_back(j * 1e15 + coord);
+        }
+    }
+    return coordinates;
 }
 
 template <typename NodeType>
