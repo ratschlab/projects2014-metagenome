@@ -7,15 +7,19 @@
 #include "common/vector_set.hpp"
 #include "common/hashers/hash.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 namespace mtg {
 namespace graph {
 namespace align {
 
+
 class DynamicLabeledGraph {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef VectorSet<Vector<uint64_t>, utils::VectorHash> Storage;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::binmat::BinaryMatrix::Row Row;
+    typedef VectorSet<Vector<Column>, utils::VectorHash> Storage;
     typedef Storage::const_iterator const_iterator;
 
     DynamicLabeledGraph(const AnnotatedDBG &anno_graph) : anno_graph_(anno_graph) {
@@ -27,11 +31,14 @@ class DynamicLabeledGraph {
 
     void flush();
     void add_node(node_index node);
-    void add_path(const std::vector<node_index> &path, std::string_view spelling);
+    void add_path(const std::vector<node_index> &path, std::string sequence);
 
     // get all sequences coordinates (k-mers) generating the node
+    // coordinates from different labels are shifted by offsets
     std::vector<size_t> get_coords(node_index node) const;
 
+    const_iterator begin() const { return targets_set_.begin(); }
+    const_iterator end() const { return targets_set_.end(); }
     const_iterator find(node_index node) const {
         auto it = targets_.find(node);
         if (it == targets_.end() || it->second == std::numeric_limits<size_t>::max()) {
@@ -41,25 +48,24 @@ class DynamicLabeledGraph {
         }
     }
 
-    const_iterator begin() const { return targets_set_.begin(); }
-    const_iterator end() const { return targets_set_.end(); }
-
   private:
     const AnnotatedDBG &anno_graph_;
 
     Storage targets_set_;
+    // map nodes to indexes in targets_set_
     tsl::hopscotch_map<node_index, size_t> targets_;
 
-    std::vector<uint64_t> added_rows_;
+    std::vector<Row> added_rows_;
     std::vector<node_index> added_nodes_;
 };
+
 
 template <class AlignmentCompare = LocalAlignmentLess>
 class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
-            anno_graph_(anno_graph) {}
+            labeled_graph_(anno_graph) {}
 
     virtual ~ILabeledAligner() {}
 
@@ -79,8 +85,9 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     }
 
   protected:
-    mutable DynamicLabeledGraph anno_graph_;
+    mutable DynamicLabeledGraph labeled_graph_;
 };
+
 
 template <typename NodeType = DeBruijnGraph::node_index>
 class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
@@ -97,7 +104,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
                                 const Aggregator &aggregator,
                                 std::string_view query)
           : BaseExtender(anno_graph.get_graph(), config, query),
-            anno_graph_(anno_graph),
+            labeled_graph_(anno_graph),
             aggregator_(aggregator),
             extensions_(anno_graph.get_graph(), aggregator_.get_query(false),
                         aggregator_.get_query(true), this->config_) {}
@@ -108,7 +115,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual std::vector<DBGAlignment> extend(score_t min_path_score) override;
 
     virtual void init_backtrack() override {
-        anno_graph_.flush();
+        labeled_graph_.flush();
         diff_target_sets_.clear();
     }
 
@@ -140,13 +147,14 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
                                  const std::function<void(DBGAlignment&&)> &callback) override;
 
   private:
-    DynamicLabeledGraph &anno_graph_;
+    DynamicLabeledGraph &labeled_graph_;
     const Aggregator &aggregator_;
     Aggregator extensions_;
     Vector<uint64_t> target_intersection_;
     size_t last_path_size_;
     tsl::hopscotch_map<size_t, Vector<uint64_t>> diff_target_sets_;
 };
+
 
 template <class Extender = LabeledBacktrackingExtender<>,
           class Seeder = UniMEMSeeder<>,
@@ -161,7 +169,7 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
                    const typename Extender::Aggregator &aggregator) const override {
-        return std::make_shared<Extender>(this->anno_graph_, this->get_config(), aggregator, query);
+        return std::make_shared<Extender>(this->labeled_graph_, this->get_config(), aggregator, query);
     }
 
     std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>

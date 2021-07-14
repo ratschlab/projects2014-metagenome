@@ -38,71 +38,6 @@ bool check_targets(const DeBruijnGraph &graph,
     return true;
 }
 
-
-template <class Callback>
-void process_seq_path(const DeBruijnGraph &graph,
-                      std::string_view query,
-                      const std::vector<node_index> &query_nodes,
-                      const Callback &callback) {
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-
-    auto run_callback = [&](node_index node, size_t i) {
-        if (!boss || boss->get_W(dbg_succ->kmer_to_boss_index(node)))
-            callback(AnnotatedDBG::graph_to_anno_index(node), i);
-    };
-
-    if (canonical) {
-        if (query_nodes.size()) {
-            auto first = std::find_if(query_nodes.begin(), query_nodes.end(),
-                                      [](auto i) -> bool { return i; });
-            if (first == query_nodes.end())
-                return;
-
-            size_t start = first - query_nodes.begin();
-
-            if (canonical->get_base_node(*first) == *first) {
-                for (size_t i = start; i < query_nodes.size(); ++i) {
-                    if (query_nodes[i] != DeBruijnGraph::npos)
-                        run_callback(canonical->get_base_node(query_nodes[i]), i);
-                }
-            } else {
-                for (size_t i = query_nodes.size(); i > start; --i) {
-                    if (query_nodes[i - 1] != DeBruijnGraph::npos)
-                        run_callback(canonical->get_base_node(query_nodes[i - 1]), i - 1);
-                }
-            }
-        }
-    } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
-        for (size_t i = 0; i < query_nodes.size(); ++i) {
-            if (query_nodes[i] != DeBruijnGraph::npos)
-                run_callback(query_nodes[i], i);
-        }
-    } else {
-        size_t i = 0;
-        if (query.front() == '#') {
-            std::string map_query
-                = graph.get_node_sequence(query_nodes[0]).substr(0, graph.get_k());
-            map_query += query.substr(graph.get_k());
-            graph.map_to_nodes(map_query, [&](node_index node) {
-                if (node != DeBruijnGraph::npos)
-                    run_callback(node, i);
-
-                ++i;
-            });
-        } else {
-            graph.map_to_nodes(query, [&](node_index node) {
-                if (node != DeBruijnGraph::npos)
-                    run_callback(node, i);
-
-                ++i;
-            });
-        }
-        assert(i == query_nodes.size());
-    }
-}
-
 void DynamicLabeledGraph::flush() {
     auto it = added_nodes_.begin();
     for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
@@ -126,9 +61,9 @@ template <typename NodeType>
 void LabeledBacktrackingExtender<NodeType>
 ::call_outgoing(NodeType node,
                 size_t max_prefetch_distance,
-                const std::function<void(NodeType, char)> &callback) {
-    auto it = anno_graph_.find(node);
-    if (this->config_.label_every_n && it == anno_graph_.end()) {
+                const std::function<void(NodeType, char /* last char */)> &callback) {
+    auto cached_labels = labeled_graph_.find(node);
+    if (this->config_.label_every_n && cached_labels == labeled_graph_.end()) {
         max_prefetch_distance = std::min(max_prefetch_distance, this->config_.label_every_n);
         std::vector<NodeType> nodes { node };
         std::string seq(this->graph_->get_k(), '#');
@@ -149,35 +84,43 @@ void LabeledBacktrackingExtender<NodeType>
                 break;
         }
 
-        anno_graph_.add_path(nodes, seq);
-        anno_graph_.flush();
-        it = anno_graph_.find(node);
+        labeled_graph_.add_path(nodes, seq);
+        labeled_graph_.flush();
+        cached_labels = labeled_graph_.find(node);
+        assert(cached_labels != labeled_graph_.end());
     }
 
     std::function<void(NodeType, char)> call = callback;
 
-    auto coords = anno_graph_.get_coords(node);
+    auto coords = labeled_graph_.get_coords(node);
+    assert(std::is_sorted(coords.begin(), coords.end()));
+
     if (coords.size()) {
+        // coordinate consistency
         for (size_t &j : coords) {
             ++j;
         }
 
-        call = [this,oc=call,bc=coords](NodeType next, char c) {
-            auto next_coords = anno_graph_.get_coords(next);
+        call = [&,bc{std::move(coords)}](NodeType next, char c) {
+            auto next_coords = labeled_graph_.get_coords(next);
+            assert(std::is_sorted(next_coords.begin(), next_coords.end()));
             if (utils::count_intersection(bc.begin(), bc.end(),
                                           next_coords.begin(), next_coords.end())) {
-                oc(next, c);
+                callback(next, c);
             }
         };
-    }
-
-    if (it != anno_graph_.end()) {
-        call = [this,it,oc=call](NodeType next, char c) {
-            auto next_it = anno_graph_.find(next);
-            if (next_it == anno_graph_.end()
-                    || utils::count_intersection(it->begin(), it->end(),
-                                                 next_it->begin(), next_it->end())) {
-                oc(next, c);
+    } else if (cached_labels != labeled_graph_.end()) {
+        // label consistency (weaker than coordinate consistency):
+        // checks if there is at least one label shared between adjacent nodes
+        call = [&](NodeType next, char c) {
+            auto next_labels = labeled_graph_.find(next);
+            // If labels at the next node are not cached, always take the edge.
+            // In this case, the label consistency will be checked later.
+            // If they are cached, the existence of at least one common label is checked.
+            if (next_labels == labeled_graph_.end()
+                    || utils::count_intersection(cached_labels->begin(), cached_labels->end(),
+                                                 next_labels->begin(), next_labels->end())) {
+                callback(next, c);
             }
         };
     }
@@ -186,13 +129,71 @@ void LabeledBacktrackingExtender<NodeType>
 }
 
 void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
-                                   std::string_view spelling) {
-    process_seq_path(get_graph(), spelling, path, [&](auto row, size_t i) {
+                                   std::string query) {
+    assert(get_graph().get_mode() != DeBruijnGraph::PRIMARY
+                && "PRIMARY graphs must be wrapped into CANONICAL");
+
+    if (path.empty())
+        return;
+
+    const auto &graph = get_graph();
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+
+    auto cache_node = [&](node_index base_node, size_t i) {
+        assert(base_node != DeBruijnGraph::npos);
+        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_node)))
+            return; // skip dummy nodes
+
         if (targets_.emplace(path[i], std::numeric_limits<size_t>::max()).second) {
-            added_rows_.push_back(row);
+            added_rows_.push_back(AnnotatedDBG::graph_to_anno_index(base_node));
             added_nodes_.push_back(path[i]);
         }
-    });
+    };
+
+    if (canonical) {
+        // primary graph (wrapped into canonical)
+        auto first = std::find_if(path.begin(), path.end(),
+                                  [](auto i) -> bool { return i; });
+        if (first == path.end())
+            return;
+
+        size_t start = first - path.begin();
+
+        if (canonical->get_base_node(*first) == *first) {
+            for (size_t i = start; i < path.size(); ++i) {
+                if (path[i] != DeBruijnGraph::npos)
+                    cache_node(canonical->get_base_node(path[i]), i);
+            }
+        } else {
+            for (size_t i = path.size(); i > start; --i) {
+                if (path[i - 1] != DeBruijnGraph::npos)
+                    cache_node(canonical->get_base_node(path[i - 1]), i - 1);
+            }
+        }
+    } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
+        // basic graph
+        for (size_t i = 0; i < path.size(); ++i) {
+            if (path[i] != DeBruijnGraph::npos)
+                cache_node(path[i], i);
+        }
+    } else {
+        // canonical graph
+
+        // reconstruct the first k-mer if it's not there
+        if (query.front() == '#')
+            query = graph.get_node_sequence(path.at(0)) + query.substr(graph.get_k());
+
+        size_t i = 0;
+        graph.map_to_nodes(query, [&](node_index node) {
+            if (node != DeBruijnGraph::npos)
+                cache_node(node, i);
+
+            ++i;
+        });
+        assert(i == path.size());
+    }
 }
 
 void DynamicLabeledGraph::add_node(node_index node) {
@@ -206,7 +207,7 @@ bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(node_index node,
                                                                const score_t *s_begin,
                                                                const score_t *s_end) {
     if (SeedFilteringExtender<NodeType>::update_seed_filter(node, query_start, s_begin, s_end)) {
-        anno_graph_.add_node(node);
+        labeled_graph_.add_node(node);
         return true;
     } else {
         return false;
@@ -223,8 +224,8 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 
         } else {
             NodeType node = std::get<3>(this->table[i]);
-            auto find = anno_graph_.find(node);
-            if (find == anno_graph_.end() || find->empty())
+            auto find = labeled_graph_.find(node);
+            if (find == labeled_graph_.end() || find->empty())
                 return true;
 
             target_intersection_ = *find;
@@ -272,8 +273,8 @@ void LabeledBacktrackingExtender<NodeType>
     if (label_path_end > last_path_size_) {
         for (size_t i = last_path_size_; i < label_path_end; ++i) {
             assert(static_cast<size_t>(i) < path.size());
-            auto find = anno_graph_.find(path[i]);
-            if (find != anno_graph_.end()) {
+            auto find = labeled_graph_.find(path[i]);
+            if (find != labeled_graph_.end()) {
                 Vector<uint64_t> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
@@ -329,7 +330,7 @@ void LabeledBacktrackingExtender<NodeType>
 
             assert(!alignment.get_offset());
             alignment.target_columns = target_intersection_;
-            assert(check_targets(*this->graph_, anno_graph_.get_anno_graph(), alignment));
+            assert(check_targets(*this->graph_, labeled_graph_.get_anno_graph(), alignment));
 
             extensions_.add_alignment(std::move(alignment));
         }
