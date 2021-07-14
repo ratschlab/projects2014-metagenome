@@ -77,7 +77,6 @@ void CanonicalDBG
 
     // map until the first mismatch
     bool stop = false;
-    auto seq_it = sequence.begin();
     graph_.map_to_nodes_sequentially(sequence,
         [&](node_index node) {
             if (node) {
@@ -85,7 +84,6 @@ void CanonicalDBG
             } else {
                 stop = true;
             }
-            ++seq_it;
         },
         [&]() { return stop; }
     );
@@ -155,9 +153,7 @@ void CanonicalDBG
     assert(path.size() == rev_path.size());
 
     auto it = rev_path.rbegin();
-    seq_it = sequence.begin();
-    auto seq_jt = rev_seq.end() - get_k();
-    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it, ++seq_it, --seq_jt) {
+    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
         if (terminate())
             return;
 
@@ -219,14 +215,15 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
                 c = kmer::KmerExtractorBOSS::complement(c);
 
                 if (children[c] != npos) {
-                    if (k_odd_) {
-                        common::logger->error(
+                    if (!k_odd_) {
+                        is_palindrome_cache_.Put(next, true);
+                    } else {
+                        throw std::runtime_error(fmt::format(
                             "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                             node, graph_.get_node_sequence(node),
                             children[c], graph_.get_node_sequence(children[c]),
-                            next, graph_.get_node_sequence(next));
-                    } else {
-                        is_palindrome_cache_.Put(next, true);
+                            next, graph_.get_node_sequence(next)
+                        ));
                     }
 
                 } else {
@@ -338,14 +335,15 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
                     c = kmer::KmerExtractorBOSS::complement(c);
 
                     if (parents[c] != npos) {
-                        if (k_odd_) {
-                            common::logger->error(
+                        if (!k_odd_) {
+                            is_palindrome_cache_.Put(prev, true);
+                        } else {
+                            throw std::runtime_error(fmt::format(
                                 "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                                 node, graph_.get_node_sequence(node),
                                 parents[c], graph_.get_node_sequence(parents[c]),
-                                prev, graph_.get_node_sequence(prev));
-                        } else {
-                            is_palindrome_cache_.Put(prev, true);
+                                prev, graph_.get_node_sequence(prev)
+                            ));
                         }
 
                     } else {
