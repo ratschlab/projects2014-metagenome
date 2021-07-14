@@ -28,7 +28,6 @@ class AlignmentAggregator {
 
   public:
     typedef Alignment<NodeType> DBGAlignment;
-    typedef std::vector<Alignment<NodeType>> Chain;
     typedef typename DBGAlignment::score_t score_t;
     typedef PriorityDeque<DBGAlignment, std::vector<DBGAlignment>, AlignmentCompare> PathQueue;
 
