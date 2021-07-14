@@ -321,9 +321,6 @@ std::string format_alignment(std::string_view header,
             }
         }
 
-        if (config.alignment_chain)
-            sout += fmt::format("\t{}", paths.get_chain_score());
-
         sout += "\n";
     } else {
         Json::StreamWriterBuilder builder;
@@ -550,11 +547,7 @@ int align_to_graph(Config *config) {
                 logger->trace("Num minibatches: {}, minibatch size: {} KB",
                               num_minibatches, mbatch_size / 1e3);
             } else {
-                if (it != end) {
-                    thread_pool.enqueue(process_batch, std::move(seq_batch));
-                } else {
-                    process_batch(std::move(seq_batch));
-                }
+                thread_pool.enqueue(process_batch, std::move(seq_batch));
             }
         };
 

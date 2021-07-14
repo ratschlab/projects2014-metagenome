@@ -36,21 +36,11 @@ class SeedAndExtendAlignerCore {
     void flush(const std::function<bool(const DBGAlignment&)> &skip
                    = [](const auto &) { return false; },
                const std::function<bool()> &terminate = []() { return false; }) {
-        if (config_.chain_alignments) {
-            aggregator_.call_alignment_chains([&](std::vector<DBGAlignment>&& chain, score_t score) {
-                for (DBGAlignment &path : chain) {
-                    paths_.emplace_back(std::move(path));
-                }
-
-                paths_.set_chain_score(score);
-            });
-        } else {
-            aggregator_.call_alignments([&](DBGAlignment&& alignment) {
-                assert(alignment.is_valid(graph_, &config_));
-                if (!skip(alignment))
-                    paths_.emplace_back(std::move(alignment));
-            }, terminate);
-        }
+        aggregator_.call_alignments([&](DBGAlignment&& alignment) {
+            assert(alignment.is_valid(graph_, &config_));
+            if (!skip(alignment))
+                paths_.emplace_back(std::move(alignment));
+        }, terminate);
     }
 
     DBGQueryAlignment& get_paths() { return paths_; }
