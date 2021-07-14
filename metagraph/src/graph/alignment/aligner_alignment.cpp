@@ -130,12 +130,7 @@ size_t Alignment<NodeType>
                 if (empty())
                     return 0;
             } break;
-            case Cigar::CLIPPED: {
-                assert(get_end_clipping());
-                assert(it + 1 == cigar_.end());
-                *this = Alignment();
-                return 0;
-            } break;
+            case Cigar::CLIPPED:
             case Cigar::NODE_INSERTION: {
                 assert(false && "trimming chains not supported");
             } break;
