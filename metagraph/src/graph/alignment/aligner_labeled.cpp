@@ -60,7 +60,7 @@ std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
     using MIM = annot::matrix::MultiIntMatrix;
     if (const auto *multi_int
             = dynamic_cast<const MIM *>(&anno_graph_.get_annotation().get_matrix())) {
-        Row row = AnnotatedDBG::graph_to_anno_index(get_graph().get_base_node(node));
+        Row row = AnnotatedDBG::graph_to_anno_index(anno_graph_.get_graph().get_base_node(node));
         for (const auto &[j, tuple] : multi_int->get_row_tuples(row)) {
             for (uint64_t coord : tuple) {
                 // TODO: make sure the offsets are correct (query max_int in multi_int)
@@ -105,7 +105,6 @@ void LabeledBacktrackingExtender<NodeType>
         labeled_graph_.add_path(nodes, seq);
         labeled_graph_.flush();
         cached_labels = labeled_graph_[node];
-        assert(cached_labels);
     }
 
     std::function<void(NodeType, char)> call = callback;
@@ -149,13 +148,13 @@ void LabeledBacktrackingExtender<NodeType>
 
 void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
                                    std::string query) {
-    assert(get_graph().get_mode() != DeBruijnGraph::PRIMARY
+    assert(anno_graph_.get_graph().get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
 
     if (path.empty())
         return;
 
-    const DeBruijnGraph &graph = get_graph();
+    const DeBruijnGraph &graph = anno_graph_.get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
@@ -178,7 +177,7 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
 }
 
 void DynamicLabeledGraph::add_node(node_index node) {
-    add_path({ node }, std::string(get_graph().get_k(), '#'));
+    add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
 template <typename NodeType>
