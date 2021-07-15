@@ -22,9 +22,9 @@ class IExtender {
     virtual ~IExtender() {}
 
     std::vector<DBGAlignment>
-    get_extensions(const DBGAlignment &seed,
-                   score_t min_path_score = std::numeric_limits<score_t>::min()) {
-        return set_seed(seed) ? extend(min_path_score) : std::vector<DBGAlignment>{};
+    get_extensions(const DBGAlignment &seed, score_t min_path_score, bool force_fixed_seed) {
+        return set_seed(seed) ? extend(min_path_score, force_fixed_seed)
+                              : std::vector<DBGAlignment>{};
     }
 
     virtual void set_graph(const DeBruijnGraph &graph) = 0;
@@ -35,7 +35,10 @@ class IExtender {
     virtual const DBGAlignment& get_seed() const = 0;
     virtual bool set_seed(const DBGAlignment &seed) = 0;
 
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score) = 0;
+    virtual std::vector<DBGAlignment> extend(score_t min_path_score, bool force_fixed_seed) = 0;
+
+    // returns whether the seed must be a prefix of an extension
+    virtual bool fixed_seed() const { return true; }
 };
 
 template <typename NodeType = uint64_t>
@@ -113,7 +116,7 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
 
     tsl::hopscotch_set<size_t> prev_starts;
 
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score) override;
+    virtual std::vector<DBGAlignment> extend(score_t min_path_score, bool force_fixed_seed) override;
 
     // backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<DBGAlignment> &extensions) const {

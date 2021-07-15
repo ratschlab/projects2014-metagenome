@@ -123,7 +123,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual ~LabeledBacktrackingExtender() {}
 
   protected:
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score) override;
+    virtual std::vector<DBGAlignment> extend(score_t min_path_score, bool fixed_seed) override;
 
     virtual void init_backtrack() override {
         labeled_graph_.flush();
@@ -140,6 +140,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
                                     size_t query_start,
                                     const score_t *s_begin,
                                     const score_t *s_end) override final;
+
+    virtual bool fixed_seed() const override final { return false; }
 
     virtual void call_outgoing(NodeType node,
                                size_t max_prefetch_distance,

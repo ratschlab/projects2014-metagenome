@@ -314,11 +314,11 @@ void LabeledBacktrackingExtender<NodeType>
 
 template <typename NodeType>
 auto LabeledBacktrackingExtender<NodeType>
-::extend(score_t min_path_score) -> std::vector<DBGAlignment> {
+::extend(score_t min_path_score, bool fixed_seed) -> std::vector<DBGAlignment> {
     extensions_.clear();
-    std::vector<DBGAlignment> extensions;
+    DefaultColumnExtender<NodeType>::extend(min_path_score, fixed_seed);
 
-    DefaultColumnExtender<NodeType>::extend(min_path_score);
+    std::vector<DBGAlignment> extensions;
     extensions_.call_alignments(
         [&](DBGAlignment&& alignment) { extensions.emplace_back(std::move(alignment)); },
         [&]() { return extensions.size() && extensions.back().get_score() < min_path_score; }

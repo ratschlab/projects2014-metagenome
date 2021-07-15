@@ -76,7 +76,8 @@ class SeedAndExtendAlignerCore {
                     const ISeeder<node_index> &seeder,
                     IExtender<node_index> &extender,
                     const LocalAlignmentCallback &callback,
-                    const MinScoreComputer &get_min_path_score);
+                    const MinScoreComputer &get_min_path_score,
+                    bool force_fixed_seed);
 
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
@@ -165,7 +166,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
              const ISeeder<node_index> &seeder,
              IExtender<node_index> &extender,
              const LocalAlignmentCallback &callback,
-             const MinScoreComputer &get_min_path_score) {
+             const MinScoreComputer &get_min_path_score,
+             bool force_fixed_seed) {
     for (DBGAlignment &seed : seeder.get_seeds()) {
         if (seed.empty())
             continue;
@@ -174,7 +176,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
-        auto extensions = extender.get_extensions(seed, min_path_score);
+        auto extensions = extender.get_extensions(seed, min_path_score, force_fixed_seed);
 
         if (extensions.empty() && seed.get_score() >= min_path_score) {
             seed.extend_query_end(query.data() + query.size());
@@ -198,7 +200,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
     std::string_view query = paths_.get_query(orientation_to_align);
 
     align_aggregate([&](const auto &alignment_callback, const auto &get_min_path_score) {
-        align_core(query, seeder, extender, alignment_callback, get_min_path_score);
+        align_core(query, seeder, extender, alignment_callback, get_min_path_score, false);
     });
 }
 
@@ -280,7 +282,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                         && config_.fraction_of_top > 0
                             ? max_score * config_.fraction_of_top
                             : config_.min_cell_score;
-                }
+                },
+                false
             );
 
             std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
@@ -315,7 +318,8 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                     assert(path.is_valid(graph_, &config_));
                     alignment_callback(std::move(path));
                 },
-                get_min_path_score
+                get_min_path_score,
+                true
             );
         };
 
