@@ -9,11 +9,13 @@
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 
+using mtg::common::logger;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
 
@@ -318,9 +320,14 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
         q_low[i] = (num_kmers - 1) * count_quantiles[i];
     }
 
+    const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
+    if (!int_matrix) {
+        logger->error("k-mer counts are not indexed in this annotator");
+        exit(1);
+    }
+
     VectorMap<size_t, std::vector<uint64_t>> code_to_counts;
-    for (const auto &row_values : dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
-                                                    .get_row_values(rows)) {
+    for (const auto &row_values : int_matrix->get_row_values(rows)) {
         for (const auto &[column, count] : row_values) {
             code_to_counts[column].push_back(count);
         }
@@ -377,28 +384,55 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    std::vector<row_index> rows;
+    std::vector<node_index> path;
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
-    rows.reserve(num_kmers);
-
-    std::vector<size_t> ids;
-    ids.reserve(num_kmers);
+    path.reserve(num_kmers);
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
+        path.push_back(i);
+    });
+
+    return get_kmer_coordinates(path, num_top_labels, presence_ratio);
+}
+
+std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
+AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
+                                   size_t num_top_labels,
+                                   double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+
+    if (!path.size())
+        return {};
+
+    std::vector<row_index> rows;
+    rows.reserve(path.size());
+
+    std::vector<size_t> ids;
+    ids.reserve(path.size());
+
+    for (node_index i : path) {
         if (i > 0) {
             ids.push_back(rows.size());
             rows.push_back(graph_to_anno_index(i));
         } else {
             ids.push_back(-1);
         }
-    });
+    }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * path.size()));
     if (rows.size() < min_count)
         return {};
 
-    auto rows_tuples = dynamic_cast<const MultiIntMatrix &>(annotator_->get_matrix())
-                                                                .get_row_tuples(rows);
+    const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
+    if (!tuple_matrix) {
+        logger->error("k-mer coordinates are not indexed in this annotator");
+        exit(1);
+    }
+
+    auto rows_tuples = tuple_matrix->get_row_tuples(rows);
+
     VectorMap<size_t, size_t> code_to_count;
     for (const auto &row_tuples : rows_tuples) {
         for (const auto &[column, tuple] : row_tuples) {
@@ -615,6 +649,8 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     assert(check_compatibility());
 
     if (with_kmer_counts) {
+        // TODO: Don't take into account counts when comparing to min_count.
+        //       It should be compared to sum_rows and not sum_row_values.
         return top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                                   .sum_row_values(index_counts, min_count),
                           annotator_->get_label_encoder(),
