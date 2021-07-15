@@ -198,6 +198,8 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     typedef std::pair<Column, PathQueue> queue_value;
     auto queues = const_cast<std::vector<queue_value>&&>(path_queue_.values_container());
+    path_queue_.clear();
+
     if (queues.empty())
         return;
 
@@ -211,10 +213,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         std::swap(merged, alignments);
     }
 
-    path_queue_.clear();
-
     for (auto it = alignments.rbegin(); it != alignments.rend() && !terminate(); ++it) {
-        callback(std::move(**it));
+        if ((*it)->size()) {
+            callback(std::move(**it));
+            **it = DBGAlignment();
+        }
     }
 }
 
@@ -224,12 +227,13 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>::construct_alignment
         return;
 
     std::vector<DBGAlignment> alignments[2];
-    for (auto it = path_queue_.begin(); it != path_queue_.end(); ++it) {
-        for (std::shared_ptr<DBGAlignment> aln : it.value().data()) {
+    for (const auto &[target, queue] : path_queue_) {
+        for (std::shared_ptr<DBGAlignment> aln : queue) {
             if (aln->size()) {
-                alignments[aln->get_orientation()].emplace_back(std::move(*aln));
+                auto &bucket = alignments[aln->get_orientation()];
+                bucket.emplace_back(std::move(*aln));
 
-                // one an alignment is used, from one label queue, clear it so
+                // once an alignment is used from one label queue, clear it so
                 // it can't be fetched from another queue
                 *aln = DBGAlignment();
             }
@@ -244,7 +248,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>::construct_alignment
     auto push_to_queue = [&](DBGAlignment&& chain) {
         auto packaged_alignment = std::make_shared<DBGAlignment>(std::move(chain));
 
-        for (Column target : packaged_alignment->target_columns) {
+        auto add_to_target = [&](Column target) {
             auto &cur_queue = path_queue_[target];
 
             for (const auto &aln : cur_queue) {
@@ -257,7 +261,12 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>::construct_alignment
             } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
                 cur_queue.update(cur_queue.begin(), packaged_alignment);
             }
-        }
+        };
+
+        add_to_target(ncol);
+        std::for_each(packaged_alignment->target_columns.begin(),
+                      packaged_alignment->target_columns.end(),
+                      add_to_target);
     };
 
     for (bool orientation : { false, true }) {
