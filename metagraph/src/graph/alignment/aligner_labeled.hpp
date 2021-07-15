@@ -43,13 +43,24 @@ class DynamicLabeledGraph {
     std::optional<std::reference_wrapper<const Vector<Column>>>
     operator[](node_index node) const {
         auto it = targets_.find(node);
-        if (it == targets_.end() || it->second == nannot) {
+        if (it == targets_.end() || it->second.second == nannot) {
             // if the node hasn't been seen before, or if its annotations haven't
             // been flushed, return nothing
             return std::nullopt;
         } else {
-            return std::cref(targets_set_.data()[it->second]);
+            return std::cref(targets_set_.data()[it->second.second]);
         }
+    }
+
+    std::vector<Row> get_anno_rows(const std::vector<node_index> &path) const {
+        std::vector<Row> rows;
+        rows.reserve(path.size());
+        for (node_index n : path) {
+            auto find = targets_.find(n);
+            assert(find != targets_.end());
+            rows.push_back(find->second.first);
+        }
+        return rows;
     }
 
   private:
@@ -62,7 +73,7 @@ class DynamicLabeledGraph {
     VectorSet<Vector<Column>, utils::VectorHash> targets_set_;
 
     // map nodes to indexes in targets_set_
-    tsl::hopscotch_map<node_index, size_t> targets_;
+    tsl::hopscotch_map<node_index, std::pair<Row, size_t>> targets_;
 
     // buffer of accessed nodes and their corresponding annotation rows
     std::vector<Row> added_rows_;

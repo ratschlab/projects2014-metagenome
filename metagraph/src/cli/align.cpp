@@ -373,15 +373,26 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
                                 std::mutex &mu) {
     std::vector<std::string> labels;
     const auto &label_encoder = query_graph.get_annotation().get_label_encoder();
+    size_t last_offset = graph.get_k() - 1;
     for (const auto &path : paths) {
         if (path.target_columns.empty()) {
             labels.emplace_back("\t*");
         } else {
-            labels.emplace_back("\t");
-            for (uint64_t target : path.target_columns) {
-                labels.back() += label_encoder.decode(target) + ";";
+            auto &cur_label = labels.emplace_back("\t");
+            for (size_t i = 0; i < path.target_columns.size(); ++i) {
+                cur_label += label_encoder.decode(path.target_columns[i]);
+                if (path.target_coordinates.size()) {
+                    for (const auto &[start, range] : path.target_coordinates[i]) {
+                        // {path starting point}-{first coordinate}-{last coordinate}-{length}
+                        // the range is incluside
+                        cur_label += fmt::format(":{}-{}-{}-{}", start,
+                                                 range.first, range.second + last_offset,
+                                                 range.second + last_offset - range.first + 1);
+                    }
+                }
+                cur_label += ";";
             }
-            labels.back().pop_back();
+            cur_label.pop_back();
         }
     }
 

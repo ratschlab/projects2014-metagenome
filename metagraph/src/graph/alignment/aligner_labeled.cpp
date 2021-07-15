@@ -16,6 +16,7 @@ namespace graph {
 namespace align {
 
 typedef DeBruijnGraph::node_index node_index;
+using MIM = annot::matrix::MultiIntMatrix;
 
 
 bool check_targets(const DeBruijnGraph &graph,
@@ -41,12 +42,19 @@ bool check_targets(const DeBruijnGraph &graph,
 
 void DynamicLabeledGraph::flush() {
     auto it = added_nodes_.begin();
+#ifndef NDEBUG
+    auto kt = added_rows_.begin();
+#endif
     for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
         assert(it != added_nodes_.end());
         auto jt = targets_set_.emplace(labels).first;
         assert(labels == *jt);
-        targets_[*it] = jt - targets_set_.begin();
+        assert(targets_[*it].first == *kt);
+        targets_[*it].second = jt - targets_set_.begin();
         ++it;
+#ifndef NDEBUG
+        ++jt;
+#endif
     }
     assert(it == added_nodes_.end());
 
@@ -57,7 +65,6 @@ void DynamicLabeledGraph::flush() {
 std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
     std::vector<size_t> coordinates;
 
-    using MIM = annot::matrix::MultiIntMatrix;
     if (const auto *multi_int
             = dynamic_cast<const MIM *>(&anno_graph_.get_annotation().get_matrix())) {
         Row row = AnnotatedDBG::graph_to_anno_index(anno_graph_.get_graph().get_base_node(node));
@@ -168,8 +175,9 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
                 continue; // skip dummy nodes
 
-            if (targets_.emplace(path[i], nannot).second) {
-                added_rows_.push_back(AnnotatedDBG::graph_to_anno_index(base_path[i]));
+            Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
+            if (targets_.emplace(path[i], std::make_pair(row, nannot)).second) {
+                added_rows_.push_back(row);
                 added_nodes_.push_back(path[i]);
             }
         }
@@ -225,6 +233,81 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 
     // skip backtracking from this node if no labels could be determined for it
     return target_intersection_.empty();
+}
+
+template <typename NodeType>
+void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
+                            const MIM &multi_int,
+                            Alignment<NodeType> &alignment) {
+    using Column = DynamicLabeledGraph::Column;
+    const std::vector<NodeType> &path = alignment.get_nodes();
+    const Vector<uint64_t> &target_columns = alignment.target_columns;
+    auto &target_coordinates = alignment.target_coordinates;
+    target_coordinates.resize(target_columns.size());
+
+    typedef tsl::hopscotch_map<int64_t, std::vector<size_t>> RelativeCoordsMap;
+    tsl::hopscotch_map<Column, RelativeCoordsMap> row_coordinates;
+    for (Column target : target_columns) {
+        row_coordinates.emplace(target, RelativeCoordsMap{});
+    }
+
+    auto tuples = multi_int.get_row_tuples(labeled_graph.get_anno_rows(path));
+    for (size_t i = 0; i < tuples.size(); ++i) {
+        for (const auto &[j, coords] : tuples[i]) {
+            auto find = row_coordinates.find(j);
+            if (find != row_coordinates.end()) {
+                for (int64_t coord : coords) {
+                    find.value()[coord - i].emplace_back(i);
+                }
+            }
+        }
+    }
+
+    for (auto it = row_coordinates.begin(); it != row_coordinates.end(); ++it) {
+        std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> &cur_target_coords
+            = target_coordinates[it->first];
+        for (auto jt = it.value().begin(); jt != it.value().end(); ++jt) {
+            int64_t start = jt->first;
+            auto &relative_coords = jt.value();
+            if (relative_coords.size()) {
+                std::sort(relative_coords.begin(), relative_coords.end());
+                relative_coords.erase(std::unique(relative_coords.begin(),
+                                                  relative_coords.end()),
+                                      relative_coords.end());
+                std::pair<size_t, size_t> cur_range(relative_coords[0], relative_coords[0]);
+                for (size_t i = 1; i < relative_coords.size(); ++i) {
+                    if (relative_coords[i] == cur_range.second + 1) {
+                        ++cur_range.second;
+                    } else {
+                        cur_target_coords.emplace_back(
+                            cur_range.first,
+                            std::make_pair(cur_range.first + start,
+                                           cur_range.second + start)
+                        );
+                        cur_range.first = relative_coords[i];
+                        cur_range.second = relative_coords[i];
+                    }
+                }
+                cur_target_coords.emplace_back(
+                    cur_range.first,
+                    std::make_pair(cur_range.first + start, cur_range.second + start)
+                );
+            }
+        }
+
+        std::sort(cur_target_coords.begin(), cur_target_coords.end(),
+                  [](const auto &a, const auto &b) {
+            return std::make_pair(b.second.second - b.second.first, a.first)
+                < std::make_pair(a.second.second - a.second.first, b.first);
+        });
+
+        auto first_sub_alignment = std::find_if(cur_target_coords.begin(),
+                                                cur_target_coords.end(),
+                                                [&path](const auto &a) {
+            return a.second.second - a.second.first + 1 < path.size();
+        });
+        cur_target_coords.erase(first_sub_alignment, cur_target_coords.end());
+    }
 }
 
 template <typename NodeType>
@@ -318,9 +401,18 @@ auto LabeledBacktrackingExtender<NodeType>
     extensions_.clear();
     DefaultColumnExtender<NodeType>::extend(min_path_score, fixed_seed);
 
+    const auto *multi_int = dynamic_cast<const MIM *>(
+        &labeled_graph_.get_anno_graph().get_annotation().get_matrix()
+    );
+
     std::vector<DBGAlignment> extensions;
     extensions_.call_alignments(
-        [&](DBGAlignment&& alignment) { extensions.emplace_back(std::move(alignment)); },
+        [&](DBGAlignment&& alignment) {
+            if (multi_int)
+                set_target_coordinates(labeled_graph_, *multi_int, alignment);
+
+            extensions.emplace_back(std::move(alignment));
+        },
         [&]() { return extensions.size() && extensions.back().get_score() < min_path_score; }
     );
 
