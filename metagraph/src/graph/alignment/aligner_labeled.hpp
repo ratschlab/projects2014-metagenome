@@ -151,10 +151,20 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     DynamicLabeledGraph &labeled_graph_;
+
+    // global set of alignments
     const Aggregator &aggregator_;
+
+    // local set of alignments
     Aggregator extensions_;
+
+    // keep track of the label set for the current backtracking
     Vector<Column> target_intersection_;
     size_t last_path_size_;
+
+    // After a node has been visited during backtracking, we keep track of which
+    // of its labels haven't been considered yet. This way, if backtracking is
+    // called from this node, then we can restrict it to these labels.
     tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
 };
 

@@ -196,9 +196,13 @@ bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(node_index node,
 template <typename NodeType>
 bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
     target_intersection_.clear();
+
     if (this->prev_starts.emplace(i).second) {
+        // if backtracking hasn't been started from here yet, get its labels
+
         auto target_find = diff_target_sets_.find(i);
         if (target_find != diff_target_sets_.end()) {
+            // extract a subset of the labels if this node was previously traversed
             target_intersection_ = target_find->second;
 
         } else {
@@ -209,6 +213,7 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 
             target_intersection_ = *find;
             if (this->seed_->target_columns.size()) {
+                // if the seed had labels, intersect with those
                 Vector<Column> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
@@ -222,6 +227,7 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
             }
         }
 
+        // we already have the labels for the first node in the path
         last_path_size_ = 1;
 
         return false;
