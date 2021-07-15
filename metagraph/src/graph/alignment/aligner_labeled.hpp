@@ -41,7 +41,7 @@ class DynamicLabeledGraph {
     const_iterator end() const { return targets_set_.end(); }
     const_iterator find(node_index node) const {
         auto it = targets_.find(node);
-        if (it == targets_.end() || it->second == std::numeric_limits<size_t>::max()) {
+        if (it == targets_.end() || it->second == nannot) {
             return targets_set_.end();
         } else {
             return targets_set_.begin() + it->second;
@@ -50,6 +50,9 @@ class DynamicLabeledGraph {
 
   private:
     const AnnotatedDBG &anno_graph_;
+
+    // placeholder index for an unfetched annotation
+    static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
     Storage targets_set_;
     // map nodes to indexes in targets_set_
@@ -92,11 +95,11 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 template <typename NodeType = DeBruijnGraph::node_index>
 class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
   public:
+    typedef DynamicLabeledGraph::Column Column;
     typedef DefaultColumnExtender<DeBruijnGraph::node_index> BaseExtender;
     typedef typename BaseExtender::score_t score_t;
     typedef typename BaseExtender::node_index node_index;
     typedef typename BaseExtender::DBGAlignment DBGAlignment;
-    typedef typename BaseExtender::ScoreVec ScoreVec;
     typedef AlignmentAggregator<node_index, LocalAlignmentLess> Aggregator;
 
     LabeledBacktrackingExtender(DynamicLabeledGraph &anno_graph,
@@ -150,9 +153,9 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     DynamicLabeledGraph &labeled_graph_;
     const Aggregator &aggregator_;
     Aggregator extensions_;
-    Vector<uint64_t> target_intersection_;
+    Vector<Column> target_intersection_;
     size_t last_path_size_;
-    tsl::hopscotch_map<size_t, Vector<uint64_t>> diff_target_sets_;
+    tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
 };
 
 

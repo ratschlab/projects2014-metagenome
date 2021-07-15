@@ -106,7 +106,7 @@ void DeBruijnGraph::traverse(node_index start,
 }
 
 DeBruijnGraph::node_index DeBruijnGraph::get_base_node(node_index node) const {
-    if (get_mode() != DeBruijnGraph::CANONICAL) {
+    if (node == npos || get_mode() != DeBruijnGraph::CANONICAL) {
         return node;
     } else {
         node_index ret_val;

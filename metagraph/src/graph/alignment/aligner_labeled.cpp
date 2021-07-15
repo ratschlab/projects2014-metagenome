@@ -26,12 +26,12 @@ bool check_targets(const DeBruijnGraph &graph,
         ::reverse_complement(query.begin(), query.end());
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
-    tsl::hopscotch_set<uint64_t> ref_targets;
+    tsl::hopscotch_set<annot::binmat::BinaryMatrix::Column> ref_targets;
     for (const std::string &label : anno_graph.get_labels(query, 1.0)) {
         ref_targets.emplace(label_encoder.encode(label));
     }
 
-    for (uint64_t target : path.target_columns) {
+    for (annot::binmat::BinaryMatrix::Column target : path.target_columns) {
         if (!ref_targets.count(target))
             return false;
     }
@@ -168,7 +168,7 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
                 continue; // skip dummy nodes
 
-            if (targets_.emplace(path[i], std::numeric_limits<size_t>::max()).second) {
+            if (targets_.emplace(path[i], nannot).second) {
                 added_rows_.push_back(AnnotatedDBG::graph_to_anno_index(base_path[i]));
                 added_nodes_.push_back(path[i]);
             }
@@ -209,7 +209,7 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 
             target_intersection_ = *find;
             if (this->seed_->target_columns.size()) {
-                Vector<uint64_t> inter;
+                Vector<Column> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
                                       this->seed_->target_columns.begin(),
@@ -254,14 +254,14 @@ void LabeledBacktrackingExtender<NodeType>
             assert(static_cast<size_t>(i) < path.size());
             auto find = labeled_graph_.find(path[i]);
             if (find != labeled_graph_.end()) {
-                Vector<uint64_t> inter;
+                Vector<Column> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
                                       find->begin(), find->end(),
                                       std::back_inserter(inter));
 
                 if (find->size() > inter.size() && this->prev_starts.count(trace[i])) {
-                    Vector<uint64_t> diff;
+                    Vector<Column> diff;
                     auto prev_find = diff_target_sets_.find(trace[i]);
                     if (prev_find == diff_target_sets_.end()) {
                         std::set_difference(find->begin(), find->end(),
