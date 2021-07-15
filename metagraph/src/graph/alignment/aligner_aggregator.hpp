@@ -376,11 +376,12 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             continue;
 
         Vector<uint64_t> target_columns;
-        if (it->target_columns.size()) {
+        if (chain.target_columns.size()) {
             std::set_intersection(it->target_columns.begin(), it->target_columns.end(),
                                   chain.target_columns.begin(),
                                   chain.target_columns.end(),
                                   std::back_inserter(target_columns));
+
             if (target_columns.empty())
                 continue;
         }
@@ -421,7 +422,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             assert(next_chain.get_score() == next_score);
             assert(next_chain.is_valid(graph_, &config_));
             if (next_chain.size()) {
-                called = true;
+                if (target_columns.size() == chain.target_columns.size())
+                    called = true;
+
                 next_chain.target_columns = std::move(target_columns);
                 construct_alignment_chain(query, std::move(next_chain), it + 1,
                                           end, best_score, callback);
