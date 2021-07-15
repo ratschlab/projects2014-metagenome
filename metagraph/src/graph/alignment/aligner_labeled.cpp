@@ -156,69 +156,30 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
     if (path.empty())
         return;
 
-    const auto &graph = get_graph();
+    const DeBruijnGraph &graph = get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-    auto cache_node = [&](node_index base_node, size_t i) {
-        assert(base_node != DeBruijnGraph::npos);
-        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_node)))
-            return; // skip dummy nodes
+    if (!canonical && graph.get_mode() == DeBruijnGraph::CANONICAL && query.front() == '#')
+        query = graph.get_node_sequence(path[0]) + query.substr(graph.get_k());
 
-        if (targets_.emplace(path[i], std::numeric_limits<size_t>::max()).second) {
-            added_rows_.push_back(AnnotatedDBG::graph_to_anno_index(base_node));
-            added_nodes_.push_back(path[i]);
-        }
-    };
+    auto [base_path, reversed] = graph.get_base_path(path, query);
+    for (size_t i = 0; i < base_path.size(); ++i) {
+        if (base_path[i] != DeBruijnGraph::npos) {
+            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
+                continue; // skip dummy nodes
 
-    if (canonical) {
-        // primary graph (wrapped into canonical)
-        auto first = std::find_if(path.begin(), path.end(),
-                                  [](auto i) -> bool { return i; });
-        if (first == path.end())
-            return;
-
-        size_t start = first - path.begin();
-
-        if (canonical->get_base_node(*first) == *first) {
-            for (size_t i = start; i < path.size(); ++i) {
-                if (path[i] != DeBruijnGraph::npos)
-                    cache_node(canonical->get_base_node(path[i]), i);
-            }
-        } else {
-            for (size_t i = path.size(); i > start; --i) {
-                if (path[i - 1] != DeBruijnGraph::npos)
-                    cache_node(canonical->get_base_node(path[i - 1]), i - 1);
+            if (targets_.emplace(path[i], std::numeric_limits<size_t>::max()).second) {
+                added_rows_.push_back(AnnotatedDBG::graph_to_anno_index(base_path[i]));
+                added_nodes_.push_back(path[i]);
             }
         }
-    } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
-        // basic graph
-        for (size_t i = 0; i < path.size(); ++i) {
-            if (path[i] != DeBruijnGraph::npos)
-                cache_node(path[i], i);
-        }
-    } else {
-        // canonical graph
-
-        // reconstruct the first k-mer if it's not there
-        if (query.front() == '#')
-            query = graph.get_node_sequence(path.at(0)) + query.substr(graph.get_k());
-
-        size_t i = 0;
-        graph.map_to_nodes(query, [&](node_index node) {
-            if (node != DeBruijnGraph::npos)
-                cache_node(node, i);
-
-            ++i;
-        });
-        assert(i == path.size());
     }
 }
 
 void DynamicLabeledGraph::add_node(node_index node) {
-    std::string dummy(get_graph().get_k(), '#');
-    add_path(std::vector<node_index>{ node }, dummy);
+    add_path(std::vector<node_index>{ node }, std::string(get_graph().get_k(), '#'));
 }
 
 template <typename NodeType>
