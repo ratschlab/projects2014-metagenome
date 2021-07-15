@@ -46,7 +46,7 @@ class DynamicLabeledGraph {
         if (it == targets_.end() || it->second == nannot) {
             // if the node hasn't been seen before, or if its annotations haven't
             // been flushed, return nothing
-            return {};
+            return std::nullopt;
         } else {
             return std::cref(targets_set_.data()[it->second]);
         }
