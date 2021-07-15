@@ -80,8 +80,8 @@ void LabeledBacktrackingExtender<NodeType>
 ::call_outgoing(NodeType node,
                 size_t max_prefetch_distance,
                 const std::function<void(NodeType, char /* last char */)> &callback) {
-    auto cached_labels = labeled_graph_.find(node);
-    if (this->config_.label_every_n && cached_labels == labeled_graph_.end()) {
+    auto cached_labels = labeled_graph_[node];
+    if (this->config_.label_every_n && cached_labels) {
         max_prefetch_distance = std::min(max_prefetch_distance, this->config_.label_every_n);
         std::vector<NodeType> nodes { node };
         std::string seq(this->graph_->get_k(), '#');
@@ -104,8 +104,8 @@ void LabeledBacktrackingExtender<NodeType>
 
         labeled_graph_.add_path(nodes, seq);
         labeled_graph_.flush();
-        cached_labels = labeled_graph_.find(node);
-        assert(cached_labels != labeled_graph_.end());
+        cached_labels = labeled_graph_[node];
+        assert(cached_labels);
     }
 
     std::function<void(NodeType, char)> call = callback;
@@ -127,17 +127,18 @@ void LabeledBacktrackingExtender<NodeType>
                 callback(next, c);
             }
         };
-    } else if (cached_labels != labeled_graph_.end()) {
+    } else if (cached_labels) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         call = [&](NodeType next, char c) {
-            auto next_labels = labeled_graph_.find(next);
+            auto next_labels = labeled_graph_[next];
             // If labels at the next node are not cached, always take the edge.
             // In this case, the label consistency will be checked later.
             // If they are cached, the existence of at least one common label is checked.
-            if (next_labels == labeled_graph_.end()
-                    || utils::count_intersection(cached_labels->begin(), cached_labels->end(),
-                                                 next_labels->begin(), next_labels->end())) {
+            if (!next_labels || utils::count_intersection(cached_labels->get().begin(),
+                                                          cached_labels->get().end(),
+                                                          next_labels->get().begin(),
+                                                          next_labels->get().end())) {
                 callback(next, c);
             }
         };
@@ -205,35 +206,26 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
             // extract a subset of the labels if this node was previously traversed
             target_intersection_ = target_find->second;
 
-        } else {
-            NodeType node = std::get<3>(this->table[i]);
-            auto find = labeled_graph_.find(node);
-            if (find == labeled_graph_.end() || find->empty())
-                return true;
-
-            target_intersection_ = *find;
+        } else if (auto labels = labeled_graph_[std::get<3>(this->table[i])]) {
             if (this->seed_->target_columns.size()) {
                 // if the seed had labels, intersect with those
-                Vector<Column> inter;
-                std::set_intersection(target_intersection_.begin(),
-                                      target_intersection_.end(),
+                std::set_intersection(labels->get().begin(),
+                                      labels->get().end(),
                                       this->seed_->target_columns.begin(),
                                       this->seed_->target_columns.end(),
-                                      std::back_inserter(inter));
-                if (inter.empty())
-                    return true;
-
-                std::swap(inter, target_intersection_);
+                                      std::back_inserter(target_intersection_));
+            } else {
+                // otherwise take the full label set
+                target_intersection_ = *labels;
             }
         }
 
         // we already have the labels for the first node in the path
         last_path_size_ = 1;
-
-        return false;
-    } else {
-        return true;
     }
+
+    // skip backtracking from this node if no labels could be determined for it
+    return target_intersection_.empty();
 }
 
 template <typename NodeType>
@@ -258,19 +250,18 @@ void LabeledBacktrackingExtender<NodeType>
     if (label_path_end > last_path_size_) {
         for (size_t i = last_path_size_; i < label_path_end; ++i) {
             assert(static_cast<size_t>(i) < path.size());
-            auto find = labeled_graph_.find(path[i]);
-            if (find != labeled_graph_.end()) {
+            if (auto labels = labeled_graph_[path[i]]) {
                 Vector<Column> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
-                                      find->begin(), find->end(),
+                                      labels->get().begin(), labels->get().end(),
                                       std::back_inserter(inter));
 
-                if (find->size() > inter.size() && this->prev_starts.count(trace[i])) {
+                if (labels->get().size() > inter.size() && this->prev_starts.count(trace[i])) {
                     Vector<Column> diff;
-                    auto prev_find = diff_target_sets_.find(trace[i]);
-                    if (prev_find == diff_target_sets_.end()) {
-                        std::set_difference(find->begin(), find->end(),
+                    auto prev_labels = diff_target_sets_.find(trace[i]);
+                    if (prev_labels == diff_target_sets_.end()) {
+                        std::set_difference(labels->get().begin(), labels->get().end(),
                                             target_intersection_.begin(),
                                             target_intersection_.end(),
                                             std::back_inserter(diff));
@@ -279,12 +270,12 @@ void LabeledBacktrackingExtender<NodeType>
                             this->prev_starts.erase(trace[i]);
                         }
                     } else {
-                        std::set_difference(prev_find->second.begin(),
-                                            prev_find->second.end(),
+                        std::set_difference(prev_labels->second.begin(),
+                                            prev_labels->second.end(),
                                             target_intersection_.begin(),
                                             target_intersection_.end(),
                                             std::back_inserter(diff));
-                        std::swap(prev_find.value(), diff);
+                        std::swap(prev_labels.value(), diff);
                         if (diff.size())
                             this->prev_starts.erase(trace[i]);
                     }

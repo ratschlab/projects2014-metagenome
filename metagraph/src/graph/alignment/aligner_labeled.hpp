@@ -1,6 +1,8 @@
 #ifndef __LABELED_ALIGNER_HPP__
 #define __LABELED_ALIGNER_HPP__
 
+#include <optional>
+
 #include <tsl/hopscotch_map.h>
 
 #include "dbg_aligner.hpp"
@@ -37,14 +39,13 @@ class DynamicLabeledGraph {
     // coordinates from different labels are shifted by offsets
     std::vector<size_t> get_coords(node_index node) const;
 
-    const_iterator begin() const { return targets_set_.begin(); }
-    const_iterator end() const { return targets_set_.end(); }
-    const_iterator find(node_index node) const {
+    std::optional<std::reference_wrapper<const Vector<Column>>>
+    operator[](node_index node) const {
         auto it = targets_.find(node);
         if (it == targets_.end() || it->second == nannot) {
-            return targets_set_.end();
+            return {};
         } else {
-            return targets_set_.begin() + it->second;
+            return std::cref(*(targets_set_.begin() + it->second));
         }
     }
 
