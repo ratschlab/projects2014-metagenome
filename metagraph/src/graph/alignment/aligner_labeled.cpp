@@ -55,26 +55,24 @@ void DynamicLabeledGraph::flush() {
 }
 
 std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
+    std::vector<size_t> coordinates;
+
     using MIM = annot::matrix::MultiIntMatrix;
     if (const auto *multi_int
             = dynamic_cast<const MIM *>(&anno_graph_.get_annotation().get_matrix())) {
-        // TODO: make sure it correctly maps nodes to rows
-        Row row = AnnotatedDBG::graph_to_anno_index(node);
-
-        std::vector<size_t> coordinates;
-
+        Row row = AnnotatedDBG::graph_to_anno_index(get_graph().get_base_node(node));
         for (const auto &[j, tuple] : multi_int->get_row_tuples(row)) {
             for (uint64_t coord : tuple) {
-                // make sure the offsets are correct (query max_int in multi_int)
+                // TODO: make sure the offsets are correct (query max_int in multi_int)
+                // TODO: if this takes up a significant amount of time, preallocate
+                //       the entire vector beforehand
                 coordinates.push_back(j * 1e15 + coord);
             }
         }
-
-        return coordinates;
-    } else {
-        // no coordinates to extract
-        return {};
+        assert(std::is_sorted(coordinates.begin(), coordinates.end()));
     }
+
+    return coordinates;
 }
 
 template <typename NodeType>
