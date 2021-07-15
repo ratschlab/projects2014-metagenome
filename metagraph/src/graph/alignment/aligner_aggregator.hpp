@@ -26,11 +26,6 @@ class AlignmentAggregator {
     template <typename Type, typename Sequence, typename Compare>
     class PriorityDeque : public boost::container::priority_deque<Type, Sequence, Compare> {
       public:
-        void sort_interval_heap() {
-            boost::heap::sort_interval_heap(this->sequence().begin(), this->sequence().end(),
-                                            this->compare());
-        }
-
         Sequence& data() { return this->sequence(); }
     };
 
@@ -208,10 +203,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         boost::heap::sort_interval_heap(queue.data().begin(), queue.data().end(), cmp_);
         std::set_union(alignments.begin(), alignments.end(),
                        queue.data().begin(), queue.data().end(),
-                       std::back_inserter(merged),
-                       [base_cmp=AlignmentCompare()](const auto &a, const auto &b) {
-                           return base_cmp(*a, *b);
-                       });
+                       std::back_inserter(merged), SharedPtrCmp());
         std::swap(merged, alignments);
     }
 
