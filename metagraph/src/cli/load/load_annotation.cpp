@@ -1,6 +1,7 @@
 #include "load_annotation.hpp"
 
 #include <string>
+#include <filesystem>
 
 #include "common/logger.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
@@ -12,6 +13,7 @@
 namespace mtg {
 namespace cli {
 
+namespace fs = std::filesystem;
 using mtg::common::logger;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
@@ -20,6 +22,9 @@ const uint64_t kBytesInGigabyte = 1'000'000'000;
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::ColumnCoord;
 
     } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
@@ -135,6 +140,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::IntRowDiffBRWT: {
             annotation.reset(new annot::IntRowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::ColumnCoord: {
+            annotation.reset(new annot::ColumnCoordAnnotator());
             break;
         }
     }
