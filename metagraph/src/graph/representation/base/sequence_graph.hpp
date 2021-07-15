@@ -67,14 +67,6 @@ class SequenceGraph {
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node) const = 0;
 
-    virtual node_index get_base_node(node_index node) const { return node; }
-
-    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
-    get_base_path(const std::vector<node_index> &path,
-                  const std::string & /* sequence */) const {
-        return std::make_pair(path, false);
-    }
-
     /********************************************************/
     /******************* graph extensions *******************/
     /********************************************************/
@@ -238,11 +230,11 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual const DeBruijnGraph& get_base_graph() const { return *this; }
 
-    virtual node_index get_base_node(node_index node) const override;
+    virtual node_index get_base_node(node_index node) const;
 
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,
-                  const std::string &sequence) const override;
+                  const std::string &sequence) const;
 };
 
 

@@ -179,7 +179,7 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
 }
 
 void DynamicLabeledGraph::add_node(node_index node) {
-    add_path(std::vector<node_index>{ node }, std::string(get_graph().get_k(), '#'));
+    add_path({ node }, std::string(get_graph().get_k(), '#'));
 }
 
 template <typename NodeType>
