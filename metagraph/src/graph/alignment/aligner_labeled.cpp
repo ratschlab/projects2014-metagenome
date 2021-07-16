@@ -16,7 +16,6 @@ namespace graph {
 namespace align {
 
 typedef DeBruijnGraph::node_index node_index;
-using MIM = annot::matrix::MultiIntMatrix;
 
 
 bool check_targets(const DeBruijnGraph &graph,
@@ -40,6 +39,14 @@ bool check_targets(const DeBruijnGraph &graph,
     return true;
 }
 
+DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
+      : anno_graph_(anno_graph),
+        multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(
+            &anno_graph_.get_annotation().get_matrix())
+        ) {
+    targets_set_.emplace(); // insert empty vector
+}
+
 void DynamicLabeledGraph::flush() {
     auto node_it = added_nodes_.begin();
     for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
@@ -61,16 +68,18 @@ void DynamicLabeledGraph::flush() {
     added_nodes_.clear();
 }
 
-std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
-    std::vector<size_t> coordinates;
+bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next) const {
+    if (!multi_int_)
+        return true;
 
-    if (const auto *multi_int
-            = dynamic_cast<const MIM *>(&anno_graph_.get_annotation().get_matrix())) {
+    auto get_coords = [&](node_index node) {
+        std::vector<size_t> coordinates;
+
         node_index base_node = anno_graph_.get_graph().get_base_node(node);
         assert(base_node);
         if (base_node) {
             Row row = AnnotatedDBG::graph_to_anno_index(base_node);
-            for (const auto &[j, tuple] : multi_int->get_row_tuples(row)) {
+            for (const auto &[j, tuple] : multi_int_->get_row_tuples(row)) {
                 for (uint64_t coord : tuple) {
                     // TODO: make sure the offsets are correct (query max_int in multi_int)
                     // TODO: if this takes up a significant amount of time, preallocate
@@ -80,9 +89,25 @@ std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
             }
             assert(std::is_sorted(coordinates.begin(), coordinates.end()));
         }
+
+        return coordinates;
+    };
+
+    auto coords = get_coords(node);
+    assert(std::is_sorted(coords.begin(), coords.end()));
+
+    if (coords.empty())
+        return true;
+
+    for (size_t &j : coords) {
+        ++j;
     }
 
-    return coordinates;
+    auto next_coords = get_coords(next);
+    assert(std::is_sorted(next_coords.begin(), next_coords.end()));
+
+    return utils::count_intersection(coords.begin(), coords.end(),
+                                     next_coords.begin(), next_coords.end());
 }
 
 template <typename NodeType>
@@ -120,23 +145,13 @@ void LabeledBacktrackingExtender<NodeType>
 
     std::function<void(NodeType, char)> call = callback;
 
-    auto coords = labeled_graph_.get_coords(node);
-    assert(std::is_sorted(coords.begin(), coords.end()));
-
-    if (coords.size()) {
+    if (labeled_graph_.get_coordinate_matrix()) {
         // coordinate consistency
-        for (size_t &j : coords) {
-            ++j;
-        }
-
-        call = [&,bc{std::move(coords)}](NodeType next, char c) {
-            auto next_coords = labeled_graph_.get_coords(next);
-            assert(std::is_sorted(next_coords.begin(), next_coords.end()));
-            if (utils::count_intersection(bc.begin(), bc.end(),
-                                          next_coords.begin(), next_coords.end())) {
+        call = [&](NodeType next, char c) {
+            if (labeled_graph_.is_coord_consistent(node, next))
                 callback(next, c);
-            }
         };
+
     } else if (cached_labels) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
@@ -173,17 +188,27 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
     if (!canonical && graph.get_mode() == DeBruijnGraph::CANONICAL && query.front() == '#')
         query = graph.get_node_sequence(path[0]) + query.substr(graph.get_k());
 
-    auto [base_path, reversed] = graph.get_base_path(path, query);
-    for (size_t i = 0; i < base_path.size(); ++i) {
-        if (base_path[i] != DeBruijnGraph::npos) {
-            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
-                continue; // skip dummy nodes
+    auto call_node = [&](node_index node, node_index base_node) {
+        if (base_node != DeBruijnGraph::npos) {
+            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_node)))
+                return; // skip dummy nodes
 
-            Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
-            if (targets_.emplace(path[i], std::make_pair(row, nannot)).second) {
+            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
+            if (targets_.emplace(node, std::make_pair(row, nannot)).second) {
                 added_rows_.push_back(row);
-                added_nodes_.push_back(path[i]);
+                added_nodes_.push_back(node);
             }
+        }
+    };
+    auto [base_path, reversed] = graph.get_base_path(path, query);
+    if (!reversed) {
+        for (size_t i = 0; i < base_path.size(); ++i) {
+            call_node(path[i], base_path[i]);
+        }
+    } else {
+        auto it = path.rbegin();
+        for (size_t i = 0; i < base_path.size(); ++i, ++it) {
+            call_node(*it, base_path[i]);
         }
     }
 }
@@ -242,9 +267,7 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 template <class AlignmentCompare>
 void ILabeledAligner<AlignmentCompare>
 ::set_target_coordinates(IDBGAligner::DBGAlignment &alignment) const {
-    const auto *multi_int = dynamic_cast<const MIM *>(
-        &labeled_graph_.get_anno_graph().get_annotation().get_matrix()
-    );
+    const auto *multi_int = labeled_graph_.get_coordinate_matrix();
 
     if (!multi_int)
         return;

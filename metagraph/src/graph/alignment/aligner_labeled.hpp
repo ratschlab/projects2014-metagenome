@@ -12,6 +12,13 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 namespace mtg {
+
+namespace annot {
+namespace matrix {
+    class MultiIntMatrix;
+}
+}
+
 namespace graph {
 namespace align {
 
@@ -24,11 +31,10 @@ class DynamicLabeledGraph {
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
-    DynamicLabeledGraph(const AnnotatedDBG &anno_graph) : anno_graph_(anno_graph) {
-        targets_set_.emplace(); // insert empty vector
-    }
+    DynamicLabeledGraph(const AnnotatedDBG &anno_graph);
 
     const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
+    const annot::matrix::MultiIntMatrix* get_coordinate_matrix() const { return multi_int_; }
 
     // flush the buffer and fetch their annotations from the AnnotatedDBG
     void flush();
@@ -37,9 +43,7 @@ class DynamicLabeledGraph {
     void add_node(node_index node);
     void add_path(const std::vector<node_index> &path, std::string sequence);
 
-    // get all sequences coordinates (k-mers) generating the node
-    // coordinates from different labels are shifted by offsets
-    std::vector<size_t> get_coords(node_index node) const;
+    bool is_coord_consistent(node_index node, node_index next) const;
 
     // get the annotations of a node if they have been fetched
     std::optional<std::reference_wrapper<const Vector<Column>>>
@@ -66,6 +70,7 @@ class DynamicLabeledGraph {
 
   private:
     const AnnotatedDBG &anno_graph_;
+    const annot::matrix::MultiIntMatrix *multi_int_;
 
     // placeholder index for an unfetched annotation
     static constexpr size_t nannot = std::numeric_limits<size_t>::max();
