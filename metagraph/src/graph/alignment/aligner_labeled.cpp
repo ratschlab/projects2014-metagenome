@@ -382,8 +382,8 @@ void ILabeledAligner<AlignmentCompare>
         if (cur_target_coords.size()) {
             std::sort(cur_target_coords.begin(), cur_target_coords.end(),
                       [](const auto &a, const auto &b) {
-                return std::make_pair(b.second.second - b.second.first, a.first)
-                    < std::make_pair(a.second.second - a.second.first, b.first);
+                return std::make_tuple(b.second.second - b.second.first, a.first, a.second.first)
+                    < std::make_tuple(a.second.second - a.second.first, b.first, b.second.first);
             });
 
             if (full_length_found) {
