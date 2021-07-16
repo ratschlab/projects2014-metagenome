@@ -89,7 +89,8 @@ template <typename NodeType>
 void LabeledBacktrackingExtender<NodeType>
 ::call_outgoing(NodeType node,
                 size_t max_prefetch_distance,
-                const std::function<void(NodeType, char /* last char */)> &callback) {
+                const std::function<void(NodeType, char /* last char */)> &callback,
+                size_t table_idx) {
     auto cached_labels = labeled_graph_[node];
     if (this->config_.label_every_n && cached_labels) {
         max_prefetch_distance = std::min(max_prefetch_distance, this->config_.label_every_n);
@@ -153,7 +154,7 @@ void LabeledBacktrackingExtender<NodeType>
         };
     }
 
-    DefaultColumnExtender<NodeType>::call_outgoing(node, max_prefetch_distance, call);
+    DefaultColumnExtender<NodeType>::call_outgoing(node, max_prefetch_distance, call, table_idx);
 }
 
 void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,

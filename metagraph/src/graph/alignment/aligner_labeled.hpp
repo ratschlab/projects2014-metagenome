@@ -165,7 +165,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     virtual void call_outgoing(NodeType node,
                                size_t max_prefetch_distance,
-                               const std::function<void(NodeType, char)> &callback) override final;
+                               const std::function<void(NodeType, char)> &callback,
+                               size_t table_idx) override final;
 
     virtual void call_alignments(score_t cur_cell_score,
                                  score_t end_score,

@@ -154,7 +154,8 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
 
     virtual void call_outgoing(NodeType node,
                                size_t max_prefetch_distance,
-                               const std::function<void(NodeType, char)> &callback);
+                               const std::function<void(NodeType, char)> &callback,
+                               size_t table_idx);
 
     DBGAlignment construct_alignment(Cigar cigar,
                                      size_t clipping,

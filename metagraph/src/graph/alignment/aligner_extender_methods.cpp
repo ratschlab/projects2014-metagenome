@@ -339,7 +339,8 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::call_outgoing(NodeType node,
                 size_t /* max_prefetch_distance */,
-                const std::function<void(NodeType, char)> &callback) {
+                const std::function<void(NodeType, char)> &callback,
+                size_t /* table_idx */) {
     graph_->call_outgoing_kmers(node, [&](NodeType next, char c) {
         if (c != boss::BOSS::kSentinel)
             callback(next, c);
@@ -471,7 +472,7 @@ auto DefaultColumnExtender<NodeType>
                     call_outgoing(node, window.size() + 1 - offset - S.size(),
                                   [&](NodeType next, char c) {
                         outgoing.emplace_back(next, c);
-                    });
+                    }, i);
                 }
             }
 
