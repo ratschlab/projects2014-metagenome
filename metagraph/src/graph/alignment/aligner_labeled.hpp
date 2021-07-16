@@ -22,6 +22,8 @@ class DynamicLabeledGraph {
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef annot::binmat::BinaryMatrix::Row Row;
 
+    static constexpr Row nrow = std::numeric_limits<Row>::max();
+
     DynamicLabeledGraph(const AnnotatedDBG &anno_graph) : anno_graph_(anno_graph) {
         targets_set_.emplace(); // insert empty vector
     }
@@ -57,8 +59,7 @@ class DynamicLabeledGraph {
         rows.reserve(path.size());
         for (node_index n : path) {
             auto find = targets_.find(n);
-            assert(find != targets_.end());
-            rows.push_back(find->second.first);
+            rows.push_back(find != targets_.end() ? find->second.first : nrow);
         }
         return rows;
     }
@@ -100,13 +101,20 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                 );
                 alignments.erase(it, alignments.end());
 
+                for (auto &alignment : alignments) {
+                    set_target_coordinates(alignment);
+                }
+
                 callback(header, std::move(alignments));
             }
         );
     }
 
+
   protected:
     mutable DynamicLabeledGraph labeled_graph_;
+
+    void set_target_coordinates(IDBGAligner::DBGAlignment &alignment) const;
 };
 
 
@@ -127,9 +135,10 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
           : BaseExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
             labeled_graph_(labeled_graph),
             aggregator_(aggregator),
+            no_chain_config_(disable_chaining(this->config_)),
             extensions_(labeled_graph.get_anno_graph().get_graph(),
                         aggregator_.get_query(false),
-                        aggregator_.get_query(true), this->config_) {}
+                        aggregator_.get_query(true), no_chain_config_) {}
 
     virtual ~LabeledBacktrackingExtender() {}
 
@@ -177,6 +186,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     const Aggregator &aggregator_;
 
     // local set of alignments
+    DBGAlignerConfig no_chain_config_;
     Aggregator extensions_;
 
     // keep track of the label set for the current backtracking
@@ -187,6 +197,11 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     // of its labels haven't been considered yet. This way, if backtracking is
     // called from this node, then we can restrict it to these labels.
     tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
+
+    static DBGAlignerConfig disable_chaining(DBGAlignerConfig config) {
+        config.chain_alignments = false;
+        return config;
+    }
 };
 
 

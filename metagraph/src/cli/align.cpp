@@ -383,9 +383,11 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
             for (size_t i = 0; i < path.target_columns.size(); ++i) {
                 cur_label += label_encoder.decode(path.target_columns[i]);
                 if (path.target_coordinates.size()) {
-                    for (const auto &[first, last] : path.target_coordinates[i]) {
-                        // {first coordinate}-{last coordinate}
-                        cur_label += fmt::format(":{}-{}", first, last + last_offset);
+                    for (const auto &[path_i, range] : path.target_coordinates[i]) {
+                        const auto &[first, last] = range;
+                        // {path_i}-{first coordinate}-{last coordinate}
+                        cur_label += fmt::format(":{}-{}-{}",
+                                                 path_i, first, last + last_offset);
                     }
                 }
                 cur_label += ";";

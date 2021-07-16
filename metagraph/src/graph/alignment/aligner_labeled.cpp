@@ -66,16 +66,20 @@ std::vector<size_t> DynamicLabeledGraph::get_coords(node_index node) const {
 
     if (const auto *multi_int
             = dynamic_cast<const MIM *>(&anno_graph_.get_annotation().get_matrix())) {
-        Row row = AnnotatedDBG::graph_to_anno_index(anno_graph_.get_graph().get_base_node(node));
-        for (const auto &[j, tuple] : multi_int->get_row_tuples(row)) {
-            for (uint64_t coord : tuple) {
-                // TODO: make sure the offsets are correct (query max_int in multi_int)
-                // TODO: if this takes up a significant amount of time, preallocate
-                //       the entire vector beforehand
-                coordinates.push_back(j * 1e15 + coord);
+        node_index base_node = anno_graph_.get_graph().get_base_node(node);
+        assert(base_node);
+        if (base_node) {
+            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
+            for (const auto &[j, tuple] : multi_int->get_row_tuples(row)) {
+                for (uint64_t coord : tuple) {
+                    // TODO: make sure the offsets are correct (query max_int in multi_int)
+                    // TODO: if this takes up a significant amount of time, preallocate
+                    //       the entire vector beforehand
+                    coordinates.push_back(j * 1e15 + coord);
+                }
             }
+            assert(std::is_sorted(coordinates.begin(), coordinates.end()));
         }
-        assert(std::is_sorted(coordinates.begin(), coordinates.end()));
     }
 
     return coordinates;
@@ -234,13 +238,19 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
     return target_intersection_.empty();
 }
 
-template <typename NodeType>
-void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
-                            const MIM &multi_int,
-                            Alignment<NodeType> &alignment) {
+template <class AlignmentCompare>
+void ILabeledAligner<AlignmentCompare>
+::set_target_coordinates(IDBGAligner::DBGAlignment &alignment) const {
+    const auto *multi_int = dynamic_cast<const MIM *>(
+        &labeled_graph_.get_anno_graph().get_annotation().get_matrix()
+    );
+
+    if (!multi_int)
+        return;
+
     using Column = DynamicLabeledGraph::Column;
-    const std::vector<NodeType> &path = alignment.get_nodes();
-    const Vector<uint64_t> &target_columns = alignment.target_columns;
+    const std::vector<IDBGAligner::node_index> &path = alignment.get_nodes();
+    const Vector<Column> &target_columns = alignment.target_columns;
     auto &target_coordinates = alignment.target_coordinates;
     target_coordinates.resize(target_columns.size());
 
@@ -250,21 +260,38 @@ void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
         row_coordinates.emplace(target, RelativeCoordsMap{});
     }
 
-    auto tuples = multi_int.get_row_tuples(labeled_graph.get_anno_rows(path));
+    auto anno_rows = labeled_graph_.get_anno_rows(path);
+    std::vector<size_t> missing_rows;
+    for (size_t i = 0; i < anno_rows.size(); ++i) {
+        if (anno_rows[i] == DynamicLabeledGraph::nrow)
+            missing_rows.push_back(i);
+    }
+
+    anno_rows.erase(std::remove_if(anno_rows.begin(), anno_rows.end(),
+                                   [](auto row) { return row == DynamicLabeledGraph::nrow; }),
+                    anno_rows.end());
+
+    auto tuples = multi_int->get_row_tuples(anno_rows);
+    size_t offset = 0;
     for (size_t i = 0; i < tuples.size(); ++i) {
+        while (offset < missing_rows.size() && i + offset == missing_rows[offset]) {
+            ++offset;
+        }
+
         for (const auto &[j, coords] : tuples[i]) {
             auto find = row_coordinates.find(j);
             if (find != row_coordinates.end()) {
                 for (int64_t coord : coords) {
-                    find.value()[coord - i].emplace_back(i);
+                    find.value()[coord - i - offset].emplace_back(i + offset);
                 }
             }
         }
     }
 
     for (auto it = row_coordinates.begin(); it != row_coordinates.end(); ++it) {
-        std::vector<std::pair<uint64_t, uint64_t>> &cur_target_coords
+        std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> &cur_target_coords
             = target_coordinates[it->first];
+        bool full_length_found = false;
         for (auto jt = it.value().begin(); jt != it.value().end(); ++jt) {
             int64_t start = jt->first;
             auto &relative_coords = jt.value();
@@ -279,18 +306,50 @@ void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
                         ++cur_range.second;
                     } else {
                         if (cur_range.second - cur_range.first + 1 == path.size()) {
-                            cur_target_coords.emplace_back(cur_range.first + start,
-                                                           cur_range.second + start);
+                            assert(!cur_range.first);
+                            if (full_length_found)
+                                continue;
+
+                            full_length_found = true;
                         }
+                        cur_target_coords.emplace_back(cur_range.first,
+                            std::make_pair(cur_range.first + start,
+                                           cur_range.second + start)
+                        );
                         cur_range.first = relative_coords[i];
                         cur_range.second = relative_coords[i];
                     }
                 }
 
                 if (cur_range.second - cur_range.first + 1 == path.size()) {
-                    cur_target_coords.emplace_back(cur_range.first + start,
-                                                   cur_range.second + start);
+                    assert(!cur_range.first);
+                    if (full_length_found)
+                        continue;
+
+                    full_length_found = true;
                 }
+
+                cur_target_coords.emplace_back(cur_range.first,
+                    std::make_pair(cur_range.first + start,
+                                   cur_range.second + start)
+                );
+            }
+        }
+
+        if (cur_target_coords.size()) {
+            std::sort(cur_target_coords.begin(), cur_target_coords.end(),
+                      [](const auto &a, const auto &b) {
+                return std::make_pair(b.second.second - b.second.first, a.first)
+                    < std::make_pair(a.second.second - a.second.first, b.first);
+            });
+
+            if (full_length_found) {
+                auto it = std::find_if(cur_target_coords.begin(),
+                                       cur_target_coords.end(),
+                                       [&path](const auto &a) {
+                    return a.second.second - a.second.first + 1 < path.size();
+                });
+                cur_target_coords.erase(it, cur_target_coords.end());
             }
         }
     }
@@ -387,24 +446,16 @@ auto LabeledBacktrackingExtender<NodeType>
     extensions_.clear();
     DefaultColumnExtender<NodeType>::extend(min_path_score, fixed_seed);
 
-    const auto *multi_int = dynamic_cast<const MIM *>(
-        &labeled_graph_.get_anno_graph().get_annotation().get_matrix()
-    );
-
     std::vector<DBGAlignment> extensions;
     extensions_.call_alignments(
-        [&](DBGAlignment&& alignment) {
-            if (multi_int)
-                set_target_coordinates(labeled_graph_, *multi_int, alignment);
-
-            extensions.emplace_back(std::move(alignment));
-        },
+        [&](DBGAlignment&& alignment) { extensions.emplace_back(std::move(alignment)); },
         [&]() { return extensions.size() && extensions.back().get_score() < min_path_score; }
     );
 
     return extensions;
 }
 
+template class ILabeledAligner<>;
 template class LabeledBacktrackingExtender<>;
 
 } // namespace align
