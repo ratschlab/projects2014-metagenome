@@ -43,7 +43,9 @@ class DynamicLabeledGraph {
     void add_node(node_index node);
     void add_path(const std::vector<node_index> &path, std::string sequence);
 
-    bool is_coord_consistent(node_index node, node_index next) const;
+    // checks if the edge (node, next), with its corresponding sequence, is
+    // consistent w.r.t. coordinates
+    bool is_coord_consistent(node_index node, node_index next, std::string sequence) const;
 
     // get the annotations of a node if they have been fetched
     std::optional<std::reference_wrapper<const Vector<Column>>>

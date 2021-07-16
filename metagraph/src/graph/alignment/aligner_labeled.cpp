@@ -68,46 +68,61 @@ void DynamicLabeledGraph::flush() {
     added_nodes_.clear();
 }
 
-bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next) const {
-    if (!multi_int_)
+bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next,
+                                              std::string sequence) const {
+    if (!multi_int_ || !node)
         return true;
 
-    auto get_coords = [&](node_index node) {
-        std::vector<size_t> coordinates;
+    const DeBruijnGraph &graph = anno_graph_.get_graph();
+    bool base_is_canonical = graph.get_base_graph().get_mode() == DeBruijnGraph::CANONICAL;
 
-        node_index base_node = anno_graph_.get_graph().get_base_node(node);
-        assert(base_node);
-        if (base_node) {
-            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
-            for (const auto &[j, tuple] : multi_int_->get_row_tuples(row)) {
-                for (uint64_t coord : tuple) {
-                    // TODO: make sure the offsets are correct (query max_int in multi_int)
-                    // TODO: if this takes up a significant amount of time, preallocate
-                    //       the entire vector beforehand
-                    coordinates.push_back(j * 1e15 + coord);
-                }
-            }
-            assert(std::is_sorted(coordinates.begin(), coordinates.end()));
-        }
-
-        return coordinates;
-    };
-
-    auto coords = get_coords(node);
-    assert(std::is_sorted(coords.begin(), coords.end()));
-
-    if (coords.empty())
-        return true;
-
-    for (size_t &j : coords) {
-        ++j;
+    if (base_is_canonical && sequence.front() == '#') {
+        sequence = graph.get_node_sequence(node) + sequence.back();
     }
 
-    auto next_coords = get_coords(next);
-    assert(std::is_sorted(next_coords.begin(), next_coords.end()));
+    auto [base_path, reversed] = graph.get_base_path({ node, next }, sequence);
 
-    return utils::count_intersection(coords.begin(), coords.end(),
-                                     next_coords.begin(), next_coords.end());
+    if ((!reversed && !base_path[1]) || (reversed && !base_path[0]))
+        return false;
+
+    base_path[0] = AnnotatedDBG::graph_to_anno_index(base_path[0]);
+    base_path[1] = AnnotatedDBG::graph_to_anno_index(base_path[1]);
+
+    auto tuples = multi_int_->get_row_tuples(base_path);
+
+    std::vector<uint64_t> coordinates[2];
+    for (size_t i = 0; i < 2; ++i) {
+        for (const auto &[j, tuple] : tuples[i]) {
+            for (uint64_t coord : tuple) {
+                // TODO: make sure the offsets are correct (query max_int in multi_int)
+                // TODO: if this takes up a significant amount of time, preallocate
+                //       the entire vector beforehand
+                coordinates[i].push_back(j * 1e15 + coord);
+            }
+        }
+        assert(std::is_sorted(coordinates[i].begin(), coordinates[i].end()));
+    }
+
+    // check if coord[0] + 1 == coord[1]
+    for (uint64_t &c : coordinates[0]) {
+        ++c;
+    }
+
+    bool check_intersection =
+        utils::count_intersection(coordinates[0].begin(), coordinates[0].end(),
+                                  coordinates[1].begin(), coordinates[1].end());
+
+    if (check_intersection || !base_is_canonical)
+        return check_intersection;
+
+    // for a base canonical graph, also check
+    // coord[0] + 1 == coord[1] + 2 <=> coord[0] - 1 == coord[1]
+    for (uint64_t &c : coordinates[1]) {
+        c += 2;
+    }
+
+    return utils::count_intersection(coordinates[0].begin(), coordinates[0].end(),
+                                     coordinates[1].begin(), coordinates[1].end());
 }
 
 template <typename NodeType>
@@ -147,8 +162,9 @@ void LabeledBacktrackingExtender<NodeType>
 
     if (labeled_graph_.get_coordinate_matrix()) {
         // coordinate consistency
-        call = [&](NodeType next, char c) {
-            if (labeled_graph_.is_coord_consistent(node, next))
+        call = [&,dummy=std::string(this->graph_->get_k(), '#')](NodeType next, char c) mutable {
+            dummy.back() = c;
+            if (labeled_graph_.is_coord_consistent(node, next, dummy))
                 callback(next, c);
         };
 
@@ -181,11 +197,13 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
         return;
 
     const DeBruijnGraph &graph = anno_graph_.get_graph();
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
+    const DeBruijnGraph &base_graph = graph.get_base_graph();
+    bool base_is_canonical = base_graph.get_mode() == DeBruijnGraph::CANONICAL;
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-    if (!canonical && graph.get_mode() == DeBruijnGraph::CANONICAL && query.front() == '#')
+    if (base_is_canonical && query.front() == '#')
         query = graph.get_node_sequence(path[0]) + query.substr(graph.get_k());
 
     auto call_node = [&](node_index node, node_index base_node) {
