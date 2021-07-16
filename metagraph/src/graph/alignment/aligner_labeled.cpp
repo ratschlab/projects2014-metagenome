@@ -264,7 +264,7 @@ void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
     }
 
     for (auto it = row_coordinates.begin(); it != row_coordinates.end(); ++it) {
-        std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> &cur_target_coords
+        std::vector<std::pair<uint64_t, uint64_t>> &cur_target_coords
             = target_coordinates[it->first];
         for (auto jt = it.value().begin(); jt != it.value().end(); ++jt) {
             int64_t start = jt->first;
@@ -279,34 +279,21 @@ void set_target_coordinates(const DynamicLabeledGraph &labeled_graph,
                     if (relative_coords[i] == cur_range.second + 1) {
                         ++cur_range.second;
                     } else {
-                        cur_target_coords.emplace_back(
-                            cur_range.first,
-                            std::make_pair(cur_range.first + start,
-                                           cur_range.second + start)
-                        );
+                        if (cur_range.second - cur_range.first + 1 == path.size()) {
+                            cur_target_coords.emplace_back(cur_range.first + start,
+                                                           cur_range.second + start);
+                        }
                         cur_range.first = relative_coords[i];
                         cur_range.second = relative_coords[i];
                     }
                 }
-                cur_target_coords.emplace_back(
-                    cur_range.first,
-                    std::make_pair(cur_range.first + start, cur_range.second + start)
-                );
+
+                if (cur_range.second - cur_range.first + 1 == path.size()) {
+                    cur_target_coords.emplace_back(cur_range.first + start,
+                                                   cur_range.second + start);
+                }
             }
         }
-
-        std::sort(cur_target_coords.begin(), cur_target_coords.end(),
-                  [](const auto &a, const auto &b) {
-            return std::make_pair(b.second.second - b.second.first, a.first)
-                < std::make_pair(a.second.second - a.second.first, b.first);
-        });
-
-        auto first_sub_alignment = std::find_if(cur_target_coords.begin(),
-                                                cur_target_coords.end(),
-                                                [&path](const auto &a) {
-            return a.second.second - a.second.first + 1 < path.size();
-        });
-        cur_target_coords.erase(first_sub_alignment, cur_target_coords.end());
     }
 }
 
