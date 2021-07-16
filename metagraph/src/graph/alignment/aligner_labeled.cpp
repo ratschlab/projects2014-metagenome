@@ -70,7 +70,7 @@ void DynamicLabeledGraph::flush() {
 
 bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next,
                                               std::string sequence) const {
-    if (!multi_int_ || !node)
+    if (!multi_int_ || !node || node == next)
         return true;
 
     const DeBruijnGraph &graph = anno_graph_.get_graph();
