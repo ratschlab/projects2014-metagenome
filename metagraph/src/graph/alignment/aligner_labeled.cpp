@@ -294,7 +294,9 @@ void ILabeledAligner<AlignmentCompare>
     const std::vector<IDBGAligner::node_index> &path = alignment.get_nodes();
     const Vector<Column> &target_columns = alignment.target_columns;
     auto &target_coordinates = alignment.target_coordinates;
-    target_coordinates.resize(target_columns.size());
+
+    typedef std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> TargetCoords;
+    target_coordinates.assign(target_columns.size(), TargetCoords{});
 
     typedef tsl::hopscotch_map<int64_t, std::vector<size_t>> RelativeCoordsMap;
     tsl::hopscotch_map<Column, RelativeCoordsMap> row_coordinates;
@@ -331,8 +333,7 @@ void ILabeledAligner<AlignmentCompare>
     }
 
     for (auto it = row_coordinates.begin(); it != row_coordinates.end(); ++it) {
-        std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> &cur_target_coords
-            = target_coordinates[it->first];
+        TargetCoords &cur_target_coords = target_coordinates[it->first];
         bool full_length_found = false;
         for (auto jt = it.value().begin(); jt != it.value().end(); ++jt) {
             int64_t start = jt->first;
