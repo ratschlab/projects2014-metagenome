@@ -13,6 +13,7 @@
 #include "aligner_config.hpp"
 
 #include "common/vector.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 namespace mtg {
@@ -25,7 +26,7 @@ namespace align {
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class Alignment {
   public:
     typedef NodeType node_index;
@@ -244,7 +245,7 @@ struct LocalAlignmentGreater {
 };
 
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class QueryAlignment {
   public:
     typedef typename std::vector<Alignment<NodeType>>::iterator iterator;

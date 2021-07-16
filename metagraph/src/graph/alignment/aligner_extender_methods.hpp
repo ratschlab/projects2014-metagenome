@@ -12,7 +12,7 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class IExtender {
   public:
     typedef Alignment<NodeType> DBGAlignment;
@@ -41,7 +41,7 @@ class IExtender {
     virtual bool fixed_seed() const { return true; }
 };
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class SeedFilteringExtender : public IExtender<NodeType> {
   public:
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
@@ -75,7 +75,7 @@ class SeedFilteringExtender : public IExtender<NodeType> {
 };
 
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
   public:
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
