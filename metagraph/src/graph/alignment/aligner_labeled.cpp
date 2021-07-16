@@ -41,22 +41,21 @@ bool check_targets(const DeBruijnGraph &graph,
 }
 
 void DynamicLabeledGraph::flush() {
-    auto it = added_nodes_.begin();
-#ifndef NDEBUG
-    auto kt = added_rows_.begin();
-#endif
+    auto node_it = added_nodes_.begin();
     for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
-        assert(it != added_nodes_.end());
-        auto jt = targets_set_.emplace(labels).first;
-        assert(labels == *jt);
-        assert(targets_[*it].first == *kt);
-        targets_[*it].second = jt - targets_set_.begin();
-        ++it;
-#ifndef NDEBUG
-        ++jt;
-#endif
+        assert(node_it != added_nodes_.end());
+
+        auto label_it = targets_set_.emplace(labels).first;
+        assert(labels == *label_it);
+        assert(targets_[*node_it].first
+            == *(added_rows_.begin() + (node_it - added_nodes_.begin())));
+
+        targets_[*node_it].second = label_it - targets_set_.begin();
+
+        ++node_it;
     }
-    assert(it == added_nodes_.end());
+
+    assert(node_it == added_nodes_.end());
 
     added_rows_.clear();
     added_nodes_.clear();
