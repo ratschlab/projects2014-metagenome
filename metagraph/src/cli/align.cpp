@@ -52,7 +52,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
     aligner_config.fraction_of_top = config.alignment_fraction_of_top;
     aligner_config.chain_alignments = config.alignment_chain;
-    aligner_config.label_every_n = config.alignment_label_every_n;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);

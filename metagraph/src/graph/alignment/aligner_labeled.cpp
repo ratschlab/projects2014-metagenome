@@ -131,33 +131,6 @@ void LabeledBacktrackingExtender<NodeType>
                 size_t max_prefetch_distance,
                 const std::function<void(NodeType, char /* last char */)> &callback,
                 size_t table_idx) {
-    auto cached_labels = labeled_graph_[node];
-    if (this->config_.label_every_n && cached_labels) {
-        max_prefetch_distance = std::min(max_prefetch_distance, this->config_.label_every_n);
-        std::vector<NodeType> nodes { node };
-        std::string seq(this->graph_->get_k(), '#');
-        for (size_t i = 0; i < max_prefetch_distance; ++i) {
-            size_t outdegree = 0;
-            this->graph_->call_outgoing_kmers(nodes.back(), [&](NodeType next, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    if (!outdegree) {
-                        nodes.push_back(next);
-                        seq += c;
-                    }
-
-                    ++outdegree;
-                }
-            });
-
-            if (outdegree != 1)
-                break;
-        }
-
-        labeled_graph_.add_path(nodes, seq);
-        labeled_graph_.flush();
-        cached_labels = labeled_graph_[node];
-    }
-
     std::function<void(NodeType, char)> call = callback;
 
     if (labeled_graph_.get_coordinate_matrix()) {
@@ -168,7 +141,7 @@ void LabeledBacktrackingExtender<NodeType>
                 callback(next, c);
         };
 
-    } else if (cached_labels) {
+    } else if (auto cached_labels = labeled_graph_[node]) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         call = [&](NodeType next, char c) {
