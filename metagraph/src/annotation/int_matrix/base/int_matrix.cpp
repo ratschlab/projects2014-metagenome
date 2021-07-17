@@ -7,29 +7,31 @@ namespace matrix {
 
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
-                          size_t min,
-                          size_t cap) const {
-    assert(cap >= min);
+                          size_t min_count) const {
+    min_count = std::max(min_count, size_t(1));
 
-    if (!cap)
-        return {};
-
-    min = std::max(min, size_t(1));
-
+    std::vector<Row> rows;
+    rows.reserve(index_counts.size());
     size_t total_sum = 0;
-    for (const auto &pair : index_counts) {
-        total_sum += pair.second;
+    for (const auto &[i, count] : index_counts) {
+        total_sum += count;
+        rows.push_back(i);
     }
 
-    if (total_sum < min)
+    if (total_sum < min_count)
         return {};
 
     std::vector<size_t> sum_row(num_columns(), 0);
+    std::vector<size_t> counts(num_columns(), 0);
 
-    for (auto [i, count] : index_counts) {
-        for (auto [j, value] : get_row_values(i)) {
+    auto row_values = get_row_values(rows);
+
+    for (size_t t = 0; t < index_counts.size(); ++t) {
+        auto [i, count] = index_counts[t];
+        for (const auto &[j, value] : row_values[t]) {
             assert(j < sum_row.size());
             sum_row[j] += count * value;
+            counts[j] += count;
         }
     }
 
@@ -37,8 +39,8 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     result.reserve(sum_row.size());
 
     for (size_t j = 0; j < num_columns(); ++j) {
-        if (sum_row[j] >= min) {
-            result.emplace_back(j, std::min(sum_row[j], cap));
+        if (counts[j] >= min_count) {
+            result.emplace_back(j, sum_row[j]);
         }
     }
 
@@ -46,7 +48,7 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 }
 
 
-// return tuple sizes (if not zero) at each entry
+// return sizes of all non-empty tuples in the row
 MultiIntMatrix::RowValues MultiIntMatrix::get_row_values(Row row) const {
     RowTuples row_tuples = get_row_tuples(row);
 
@@ -60,6 +62,7 @@ MultiIntMatrix::RowValues MultiIntMatrix::get_row_values(Row row) const {
     return row_values;
 }
 
+// for each row return the sizes of all non-empty tuples
 std::vector<MultiIntMatrix::RowValues>
 MultiIntMatrix::get_row_values(const std::vector<Row> &rows) const {
     std::vector<RowTuples> row_tuples = get_row_tuples(rows);
