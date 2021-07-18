@@ -62,6 +62,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
+    logger->trace("\t Chain alignments: {}", aligner_config.chain_alignments);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
