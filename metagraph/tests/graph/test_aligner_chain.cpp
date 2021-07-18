@@ -21,7 +21,7 @@ class DBGAlignerChainTest : public DeBruijnGraphTest<Graph> {};
 
 TYPED_TEST_SUITE(DBGAlignerChainTest, FewGraphTypes);
 
-inline void check_chain(const IDBGAligner::DBGQueryAlignment &paths,
+inline void check_chain(const QueryAlignment &paths,
                         const DeBruijnGraph &graph,
                         const DBGAlignerConfig &config,
                         bool has_chain = true) {
