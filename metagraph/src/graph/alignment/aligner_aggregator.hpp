@@ -6,6 +6,7 @@
 #include "aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vector_map.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 namespace mtg {
 namespace graph {
@@ -23,9 +24,23 @@ class PriorityDeque : public boost::container::priority_deque<Type, Sequence, Co
 template <class AlignmentCompare>
 class AlignmentAggregator {
   public:
+    struct SharedPtrCmp {
+        bool operator()(const std::shared_ptr<Alignment> &a,
+                        const std::shared_ptr<Alignment> &b) const {
+            return base_cmp_(*a, *b);
+        }
+
+        AlignmentCompare base_cmp_;
+    };
+
     typedef Alignment::node_index node_index;
     typedef Alignment::score_t score_t;
-    typedef PriorityDeque<Alignment, std::vector<Alignment>, AlignmentCompare> PathQueue;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef PriorityDeque<std::shared_ptr<Alignment>,
+                          std::vector<std::shared_ptr<Alignment>>,
+                          SharedPtrCmp> PathQueue;
+
+    static constexpr Column ncol = std::numeric_limits<Column>::max();
 
     AlignmentAggregator(const DeBruijnGraph &graph,
                         std::string_view query,
@@ -37,11 +52,19 @@ class AlignmentAggregator {
 
     void add_alignment(Alignment&& alignment);
 
-    score_t get_min_path_score() const;
-    score_t get_max_path_score() const;
+    score_t get_min_path_score(const Vector<Column> &targets) const;
+    score_t get_max_path_score(const Vector<Column> &targets) const;
 
-    score_t get_min_path_score(const Alignment &) const { return get_min_path_score(); }
-    score_t get_max_path_score(const Alignment &) const { return get_max_path_score(); }
+    score_t get_min_path_score(Column target = ncol) const;
+    score_t get_max_path_score(Column target = ncol) const;
+
+    score_t get_min_path_score(const Alignment &seed) const {
+        return get_min_path_score(seed.target_columns);
+    }
+
+    score_t get_max_path_score(const Alignment &seed) const {
+        return get_max_path_score(seed.target_columns);
+    }
 
     const Alignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
@@ -49,13 +72,23 @@ class AlignmentAggregator {
     void call_alignments(const std::function<void(Alignment&&)> &callback,
                          const std::function<bool()> &terminate = []() { return false; });
 
-    size_t size() const { return path_queue_.size(); }
+    size_t size() const {
+        size_t size = 0;
+        for (const auto &[target, queue] : path_queue_)
+            size += queue.size();
+
+        return size;
+    }
+
+    size_t num_targets() const { return path_queue_.size(); }
 
     bool empty() const { return path_queue_.empty(); }
 
+    VectorMap<Column, PathQueue>& data() { return path_queue_; }
+
     void clear() { path_queue_.clear(); }
 
-    std::string_view get_query(bool is_reverse_complement) {
+    std::string_view get_query(bool is_reverse_complement) const {
         return is_reverse_complement ? rc_query_ : query_;
     }
 
@@ -64,8 +97,8 @@ class AlignmentAggregator {
     std::string_view rc_query_;
     const DBGAlignerConfig &config_;
     const DeBruijnGraph &graph_;
-    PathQueue path_queue_;
-    AlignmentCompare cmp_;
+    VectorMap<Column, PathQueue> path_queue_;
+    SharedPtrCmp cmp_;
 
     void construct_alignment_chains();
     void construct_alignment_chain(std::string_view query,
@@ -80,27 +113,80 @@ class AlignmentAggregator {
 template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>
 ::add_alignment(Alignment&& alignment) {
-    if (std::find(path_queue_.begin(), path_queue_.end(), alignment) != path_queue_.end())
-        return;
+    auto packaged_alignment = std::make_shared<Alignment>(std::move(alignment));
 
-    if (config_.chain_alignments || path_queue_.size() < config_.num_alternative_paths) {
-        path_queue_.emplace(std::move(alignment));
-    } else if (!cmp_(alignment, path_queue_.minimum())) {
-        path_queue_.update(path_queue_.begin(), std::move(alignment));
+    auto add_to_target = [&](Column target) {
+        auto &cur_queue = path_queue_[target];
+
+        for (const auto &aln : cur_queue) {
+            if (*packaged_alignment == *aln)
+                return;
+        }
+
+        if (config_.chain_alignments || cur_queue.size() < config_.num_alternative_paths) {
+            cur_queue.emplace(packaged_alignment);
+        } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
+            cur_queue.update(cur_queue.begin(), packaged_alignment);
+        }
+    };
+
+    add_to_target(ncol);
+    std::for_each(packaged_alignment->target_columns.begin(),
+                  packaged_alignment->target_columns.end(),
+                  add_to_target);
+}
+
+template <class AlignmentCompare>
+inline auto AlignmentAggregator<AlignmentCompare>
+::get_min_path_score(const Vector<Column> &targets) const -> score_t {
+    score_t global_min = !config_.chain_alignments
+        ? get_max_path_score() * config_.fraction_of_top
+        : std::numeric_limits<score_t>::min();
+
+    if (targets.empty())
+        return std::max(global_min, get_min_path_score());
+
+    score_t min_score = std::numeric_limits<score_t>::max();
+    for (Column target : targets) {
+        if (min_score < global_min)
+            break;
+
+        min_score = std::min(min_score, get_min_path_score(target));
     }
+
+    return std::max(global_min, min_score);
 }
 
 template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>::get_min_path_score() const -> score_t {
-    return config_.chain_alignments || path_queue_.size() < config_.num_alternative_paths
+inline auto AlignmentAggregator<AlignmentCompare>
+::get_max_path_score(const Vector<Column> &targets) const -> score_t {
+    if (targets.empty())
+        return get_max_path_score();
+
+    score_t max_score = std::numeric_limits<score_t>::min();
+    for (Column target : targets) {
+        max_score = std::max(max_score, get_max_path_score(target));
+    }
+
+    return max_score;
+}
+
+template <class AlignmentCompare>
+inline auto AlignmentAggregator<AlignmentCompare>
+::get_min_path_score(Column target) const -> score_t {
+    auto find = path_queue_.find(target);
+    return config_.chain_alignments || find == path_queue_.end()
+            || find->second.size() < config_.num_alternative_paths
         ? config_.min_path_score
-        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.fraction_of_top),
-                   path_queue_.minimum().get_score());
+        : find->second.minimum()->get_score();
 }
 
 template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>::get_max_path_score() const -> score_t {
-    return path_queue_.size() ? path_queue_.maximum().get_score() : config_.min_path_score;
+inline auto AlignmentAggregator<AlignmentCompare>
+::get_max_path_score(Column target) const -> score_t {
+    auto find = path_queue_.find(target);
+    return find == path_queue_.end() ? config_.min_path_score
+                                     : find->second.maximum()->get_score();
 }
 
 template <class AlignmentCompare>
@@ -110,10 +196,28 @@ inline void AlignmentAggregator<AlignmentCompare>
     if (config_.chain_alignments)
         construct_alignment_chains();
 
-    auto &data = path_queue_.data();
-    for (auto it = data.rbegin(); it != data.rend() && !terminate(); ++it) {
-        boost::heap::pop_interval_heap_max(data.begin(), it.base(), path_queue_.cmp());
-        callback(std::move(*it));
+    typedef std::pair<Column, PathQueue> queue_value;
+    auto queues = const_cast<std::vector<queue_value>&&>(path_queue_.values_container());
+    path_queue_.clear();
+
+    if (queues.empty())
+        return;
+
+    std::vector<std::shared_ptr<Alignment>> alignments;
+    for (auto &[target, queue] : queues) {
+        std::vector<std::shared_ptr<Alignment>> merged;
+        boost::heap::sort_interval_heap(queue.data().begin(), queue.data().end(), cmp_);
+        std::set_union(alignments.begin(), alignments.end(),
+                       queue.data().begin(), queue.data().end(),
+                       std::back_inserter(merged), SharedPtrCmp());
+        std::swap(merged, alignments);
+    }
+
+    for (auto it = alignments.rbegin(); it != alignments.rend() && !terminate(); ++it) {
+        if ((*it)->size()) {
+            callback(std::move(**it));
+            **it = Alignment();
+        }
     }
 }
 
@@ -123,8 +227,17 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
         return;
 
     std::vector<Alignment> alignments[2];
-    for (const auto &alignment : path_queue_) {
-        alignments[alignment.get_orientation()].push_back(alignment);
+    for (const auto &[target, queue] : path_queue_) {
+        for (std::shared_ptr<Alignment> aln : queue) {
+            if (aln->size()) {
+                auto &bucket = alignments[aln->get_orientation()];
+                bucket.emplace_back(std::move(*aln));
+
+                // once an alignment is used from one label queue, clear it so
+                // it can't be fetched from another queue
+                *aln = Alignment();
+            }
+        }
     }
 
     if (alignments[0].empty() && alignments[1].empty())
@@ -133,14 +246,27 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
     path_queue_.clear();
 
     auto push_to_queue = [&](Alignment&& chain) {
-        if (std::find(path_queue_.begin(), path_queue_.end(), chain) != path_queue_.end())
-            return;
+        auto packaged_alignment = std::make_shared<Alignment>(std::move(chain));
 
-        if (path_queue_.size() < config_.num_alternative_paths) {
-            path_queue_.emplace(std::move(chain));
-        } else if (!cmp_(chain, path_queue_.minimum())) {
-            path_queue_.update(path_queue_.begin(), std::move(chain));
-        }
+        auto add_to_target = [&](Column target) {
+            auto &cur_queue = path_queue_[target];
+
+            for (const auto &aln : cur_queue) {
+                if (*packaged_alignment == *aln)
+                    return;
+            }
+
+            if (cur_queue.size() < config_.num_alternative_paths) {
+                cur_queue.emplace(packaged_alignment);
+            } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
+                cur_queue.update(cur_queue.begin(), packaged_alignment);
+            }
+        };
+
+        add_to_target(ncol);
+        std::for_each(packaged_alignment->target_columns.begin(),
+                      packaged_alignment->target_columns.end(),
+                      add_to_target);
     };
 
     for (bool orientation : { false, true }) {
@@ -210,6 +336,17 @@ inline void AlignmentAggregator<AlignmentCompare>
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
+        Vector<Column> target_columns;
+        if (chain.target_columns.size()) {
+            std::set_intersection(it->target_columns.begin(), it->target_columns.end(),
+                                  chain.target_columns.begin(),
+                                  chain.target_columns.end(),
+                                  std::back_inserter(target_columns));
+
+            if (target_columns.empty())
+                continue;
+        }
+
         Alignment aln(*it);
 
         if (next_begin >= chain_end) {
@@ -246,7 +383,10 @@ inline void AlignmentAggregator<AlignmentCompare>
             assert(next_chain.get_score() == next_score);
             assert(next_chain.is_valid(graph_, &config_));
             if (next_chain.size()) {
-                called = true;
+                if (target_columns.size() == chain.target_columns.size())
+                    called = true;
+
+                next_chain.target_columns = std::move(target_columns);
                 construct_alignment_chain(query, std::move(next_chain), it + 1,
                                           end, best_score, callback);
             }

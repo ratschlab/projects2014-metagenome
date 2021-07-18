@@ -20,9 +20,9 @@ class IExtender {
     virtual ~IExtender() {}
 
     std::vector<Alignment>
-    get_extensions(const Alignment &seed,
-                   score_t min_path_score = std::numeric_limits<score_t>::min()) {
-        return set_seed(seed) ? extend(min_path_score) : std::vector<Alignment>{};
+    get_extensions(const Alignment &seed, score_t min_path_score, bool force_fixed_seed) {
+        return set_seed(seed) ? extend(min_path_score, force_fixed_seed)
+                              : std::vector<Alignment>{};
     }
 
     virtual void set_graph(const DeBruijnGraph &graph) = 0;
@@ -33,7 +33,10 @@ class IExtender {
     virtual const Alignment& get_seed() const = 0;
     virtual bool set_seed(const Alignment &seed) = 0;
 
-    virtual std::vector<Alignment> extend(score_t min_path_score) = 0;
+    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) = 0;
+
+    // returns whether the seed must be a prefix of an extension
+    virtual bool fixed_seed() const { return true; }
 };
 
 class SeedFilteringExtender : public IExtender {
@@ -100,7 +103,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     tsl::hopscotch_set<size_t> prev_starts;
 
-    virtual std::vector<Alignment> extend(score_t min_path_score) override;
+    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
 
     // backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
@@ -138,15 +141,16 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(node_index, char)> &callback);
+                               const std::function<void(node_index, char)> &callback,
+                               size_t table_idx);
 
     Alignment construct_alignment(Cigar cigar,
-                                     size_t clipping,
-                                     std::string_view window,
-                                     std::vector<node_index> final_path,
-                                     std::string match,
-                                     score_t score,
-                                     size_t offset) const;
+                                  size_t clipping,
+                                  std::string_view window,
+                                  std::vector<node_index> final_path,
+                                  std::string match,
+                                  score_t score,
+                                  size_t offset) const;
 
   private:
     // compute perfect match scores for all suffixes
