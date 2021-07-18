@@ -63,6 +63,8 @@ void Alignment::append(Alignment&& other) {
     score_ += other.score_;
 
     cigar_.append(std::move(other.cigar_));
+
+    // expand the query window to cover both alignments
     query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
 }
 
