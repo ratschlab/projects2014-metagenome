@@ -93,6 +93,8 @@ class DynamicLabeledGraph {
 template <class AlignmentCompare = LocalAlignmentLess>
 class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
+    typedef IDBGAligner::node_index node_index;
+
     ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
             labeled_graph_(anno_graph) {}
@@ -102,7 +104,7 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     virtual void align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
                              const IDBGAligner::AlignmentCallback &callback) const override {
         ISeedAndExtendAligner<AlignmentCompare>::align_batch(seq_batch,
-            [&](std::string_view header, IDBGAligner::DBGQueryAlignment&& alignments) {
+            [&](std::string_view header, QueryAlignment&& alignments) {
                 auto it = std::remove_if(
                     alignments.begin(), alignments.end(),
                     [](const auto &a) { return a.target_columns.empty(); }
@@ -122,25 +124,20 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   protected:
     mutable DynamicLabeledGraph labeled_graph_;
 
-    void set_target_coordinates(IDBGAligner::DBGAlignment &alignment) const;
+    void set_target_coordinates(Alignment &alignment) const;
 };
 
 
-template <typename NodeType = DeBruijnGraph::node_index>
-class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
+class LabeledBacktrackingExtender : public DefaultColumnExtender {
   public:
     typedef DynamicLabeledGraph::Column Column;
-    typedef DefaultColumnExtender<DeBruijnGraph::node_index> BaseExtender;
-    typedef typename BaseExtender::score_t score_t;
-    typedef typename BaseExtender::node_index node_index;
-    typedef typename BaseExtender::DBGAlignment DBGAlignment;
-    typedef AlignmentAggregator<node_index, LocalAlignmentLess> Aggregator;
+    typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
 
     LabeledBacktrackingExtender(DynamicLabeledGraph &labeled_graph,
                                 const DBGAlignerConfig &config,
                                 const Aggregator &aggregator,
                                 std::string_view query)
-          : BaseExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
+          : DefaultColumnExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
             labeled_graph_(labeled_graph),
             aggregator_(aggregator),
             no_chain_config_(disable_chaining(this->config_)),
@@ -151,14 +148,14 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual ~LabeledBacktrackingExtender() {}
 
   protected:
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score, bool fixed_seed) override;
+    virtual std::vector<Alignment> extend(score_t min_path_score, bool fixed_seed) override;
 
     virtual void init_backtrack() override {
         labeled_graph_.flush();
         diff_target_sets_.clear();
     }
 
-    virtual bool terminate_backtrack_start(const std::vector<DBGAlignment> &) const override final { return false; }
+    virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final { return false; }
 
     virtual bool terminate_backtrack() const override final { return target_intersection_.empty(); }
 
@@ -171,9 +168,9 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     virtual bool fixed_seed() const override final { return false; }
 
-    virtual void call_outgoing(NodeType node,
+    virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(NodeType, char)> &callback,
+                               const std::function<void(node_index, char)> &callback,
                                size_t table_idx) override final;
 
     virtual void call_alignments(score_t cur_cell_score,
@@ -186,7 +183,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
                                  size_t offset,
                                  std::string_view window,
                                  const std::string &match,
-                                 const std::function<void(DBGAlignment&&)> &callback) override final;
+                                 const std::function<void(Alignment&&)> &callback) override final;
 
   private:
     DynamicLabeledGraph &labeled_graph_;
@@ -214,8 +211,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 };
 
 
-template <class Extender = LabeledBacktrackingExtender<>,
-          class Seeder = UniMEMSeeder<>,
+template <class Extender = LabeledBacktrackingExtender,
+          class Seeder = UniMEMSeeder,
           class AlignmentCompare = LocalAlignmentLess>
 class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
@@ -224,16 +221,16 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
           : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
 
   protected:
-    std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
+    std::shared_ptr<IExtender>
     build_extender(std::string_view query,
                    const typename Extender::Aggregator &aggregator) const override final {
         return std::make_shared<Extender>(this->labeled_graph_, this->get_config(), aggregator, query);
     }
 
-    std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<DeBruijnGraph::node_index> &nodes) const override final {
+                 const std::vector<IDBGAligner::node_index> &nodes) const override final {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 };

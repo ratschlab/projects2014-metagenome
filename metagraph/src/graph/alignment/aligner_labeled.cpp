@@ -15,12 +15,10 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-typedef DeBruijnGraph::node_index node_index;
-
 
 bool check_targets(const DeBruijnGraph &graph,
                    const AnnotatedDBG &anno_graph,
-                   const Alignment<node_index> &path) {
+                   const Alignment &path) {
     std::string query = path.get_sequence();
     if (dynamic_cast<const RCDBG*>(&graph))
         ::reverse_complement(query.begin(), query.end());
@@ -125,17 +123,16 @@ bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next,
                                      coordinates[1].begin(), coordinates[1].end());
 }
 
-template <typename NodeType>
-void LabeledBacktrackingExtender<NodeType>
-::call_outgoing(NodeType node,
+void LabeledBacktrackingExtender
+::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
-                const std::function<void(NodeType, char /* last char */)> &callback,
+                const std::function<void(node_index, char /* last char */)> &callback,
                 size_t table_idx) {
-    std::function<void(NodeType, char)> call = callback;
+    std::function<void(node_index, char)> call = callback;
 
     if (labeled_graph_.get_coordinate_matrix()) {
         // coordinate consistency
-        call = [&,dummy=std::string(this->graph_->get_k(), '#')](NodeType next, char c) mutable {
+        call = [&,dummy=std::string(this->graph_->get_k(), '#')](node_index next, char c) mutable {
             dummy.back() = c;
             if (labeled_graph_.is_coord_consistent(node, next, dummy))
                 callback(next, c);
@@ -144,7 +141,7 @@ void LabeledBacktrackingExtender<NodeType>
     } else if (auto cached_labels = labeled_graph_[node]) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
-        call = [&](NodeType next, char c) {
+        call = [&](node_index next, char c) {
             auto next_labels = labeled_graph_[next];
             // If labels at the next node are not cached, always take the edge.
             // In this case, the label consistency will be checked later.
@@ -158,7 +155,7 @@ void LabeledBacktrackingExtender<NodeType>
         };
     }
 
-    DefaultColumnExtender<NodeType>::call_outgoing(node, max_prefetch_distance, call, table_idx);
+    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance, call, table_idx);
 }
 
 void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
@@ -208,12 +205,11 @@ void DynamicLabeledGraph::add_node(node_index node) {
     add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
-template <typename NodeType>
-bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(node_index node,
-                                                               size_t query_start,
-                                                               const score_t *s_begin,
-                                                               const score_t *s_end) {
-    if (SeedFilteringExtender<NodeType>::update_seed_filter(node, query_start, s_begin, s_end)) {
+bool LabeledBacktrackingExtender::update_seed_filter(node_index node,
+                                                     size_t query_start,
+                                                     const score_t *s_begin,
+                                                     const score_t *s_end) {
+    if (SeedFilteringExtender::update_seed_filter(node, query_start, s_begin, s_end)) {
         labeled_graph_.add_node(node);
         return true;
     } else {
@@ -221,8 +217,7 @@ bool LabeledBacktrackingExtender<NodeType>::update_seed_filter(node_index node,
     }
 }
 
-template <typename NodeType>
-bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
+bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     target_intersection_.clear();
 
     if (this->prev_starts.emplace(i).second) {
@@ -256,15 +251,14 @@ bool LabeledBacktrackingExtender<NodeType>::skip_backtrack_start(size_t i) {
 }
 
 template <class AlignmentCompare>
-void ILabeledAligner<AlignmentCompare>
-::set_target_coordinates(IDBGAligner::DBGAlignment &alignment) const {
+void ILabeledAligner<AlignmentCompare>::set_target_coordinates(Alignment &alignment) const {
     const auto *multi_int = labeled_graph_.get_coordinate_matrix();
 
     if (!multi_int)
         return;
 
     using Column = DynamicLabeledGraph::Column;
-    const std::vector<IDBGAligner::node_index> &path = alignment.get_nodes();
+    const std::vector<node_index> &path = alignment.get_nodes();
     const Vector<Column> &target_columns = alignment.target_columns;
     auto &target_coordinates = alignment.target_coordinates;
 
@@ -371,8 +365,7 @@ void ILabeledAligner<AlignmentCompare>
     }
 }
 
-template <typename NodeType>
-void LabeledBacktrackingExtender<NodeType>
+void LabeledBacktrackingExtender
 ::call_alignments(score_t cur_cell_score,
                   score_t end_score,
                   score_t min_path_score,
@@ -383,7 +376,7 @@ void LabeledBacktrackingExtender<NodeType>
                   size_t offset,
                   std::string_view window,
                   const std::string &match,
-                  const std::function<void(DBGAlignment&&)> & /* callback */) {
+                  const std::function<void(Alignment&&)> & /* callback */) {
     assert(path.size());
     assert(ops.size());
     assert(target_intersection_.size());
@@ -443,7 +436,7 @@ void LabeledBacktrackingExtender<NodeType>
         );
 
         if (end_score - cur_cell_score >= target_score) {
-            DBGAlignment alignment = this->construct_alignment(
+            Alignment alignment = this->construct_alignment(
                 ops, clipping, window, path, match, end_score - cur_cell_score, offset
             );
 
@@ -456,15 +449,14 @@ void LabeledBacktrackingExtender<NodeType>
     }
 }
 
-template <typename NodeType>
-auto LabeledBacktrackingExtender<NodeType>
-::extend(score_t min_path_score, bool fixed_seed) -> std::vector<DBGAlignment> {
+auto LabeledBacktrackingExtender
+::extend(score_t min_path_score, bool fixed_seed) -> std::vector<Alignment> {
     extensions_.clear();
-    DefaultColumnExtender<NodeType>::extend(min_path_score, fixed_seed);
+    DefaultColumnExtender::extend(min_path_score, fixed_seed);
 
-    std::vector<DBGAlignment> extensions;
+    std::vector<Alignment> extensions;
     extensions_.call_alignments(
-        [&](DBGAlignment&& alignment) { extensions.emplace_back(std::move(alignment)); },
+        [&](Alignment&& alignment) { extensions.emplace_back(std::move(alignment)); },
         [&]() { return extensions.size() && extensions.back().get_score() < min_path_score; }
     );
 
@@ -472,7 +464,6 @@ auto LabeledBacktrackingExtender<NodeType>
 }
 
 template class ILabeledAligner<>;
-template class LabeledBacktrackingExtender<>;
 
 } // namespace align
 } // namespace graph

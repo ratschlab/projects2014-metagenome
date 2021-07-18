@@ -365,7 +365,7 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
                                 const AnnotatedDBG &query_graph,
                                 const Config &config,
                                 std::string_view header,
-                                IDBGAligner::DBGQueryAlignment&& paths,
+                                QueryAlignment&& paths,
                                 std::ostream &out,
                                 std::mutex &mu) {
     std::vector<std::string> labels;

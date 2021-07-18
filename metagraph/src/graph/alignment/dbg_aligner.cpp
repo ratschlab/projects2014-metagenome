@@ -96,7 +96,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
-        size_t num_targets = core.get_aggregator().num_targets();
+        size_t num_targets = aggregator.num_targets();
 
         aggregator.call_alignments([&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));

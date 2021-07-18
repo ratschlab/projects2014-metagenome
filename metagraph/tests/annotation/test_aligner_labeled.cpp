@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "../graph/all/test_dbg_helpers.hpp"
-#include "../graph/test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
@@ -22,9 +21,8 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 
-inline std::vector<std::string>
-get_alignment_labels(const AnnotatedDBG &anno_graph,
-                     const LabeledAligner<>::DBGAlignment &alignment) {
+inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_graph,
+                                                     const Alignment &alignment) {
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     auto labels = anno_graph.get_labels(alignment.get_sequence(), 1.0);
     EXPECT_GE(labels.size(), alignment.target_columns.size());

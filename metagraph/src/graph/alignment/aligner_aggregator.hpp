@@ -182,7 +182,7 @@ inline auto AlignmentAggregator<AlignmentCompare>
 }
 
 template <class AlignmentCompare>
-inline auto AlignmentAggregator<NodeType, AlignmentCompare>
+inline auto AlignmentAggregator<AlignmentCompare>
 ::get_max_path_score(Column target) const -> score_t {
     auto find = path_queue_.find(target);
     return find == path_queue_.end() ? config_.min_path_score
