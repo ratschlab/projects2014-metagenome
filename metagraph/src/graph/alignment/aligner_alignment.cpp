@@ -63,7 +63,7 @@ void Alignment::append(Alignment&& other) {
     score_ += other.score_;
 
     cigar_.append(std::move(other.cigar_));
-    query_ = { query_.data(), other.query_.size() + (other.query_.data() - query_.data()) };
+    query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
 }
 
 size_t Alignment::trim_offset() {
@@ -602,7 +602,7 @@ std::shared_ptr<const std::string> Alignment
             graph.call_outgoing_kmers(*(nodes_.rbegin() + 1),
                                       [&](auto node, char c) {
                 if (node == nodes_.back())
-                    sequence_ += c;
+                    sequence_.push_back(c);
             });
         }
         const Json::Value &edits = mapping[i]["edit"];
@@ -759,11 +759,7 @@ bool spell_path(const DeBruijnGraph &graph,
 
     for (size_t i = 1; i < path.size(); ++i) {
         if (num_dummy > graph.get_k()) {
-            std::string out_msg;
-            for (DeBruijnGraph::node_index node : path) {
-                out_msg += fmt::format("{} ", node);
-            }
-            logger->error("Too many dummy nodes\n{}", out_msg);
+            logger->error("Too many dummy nodes\n{}", fmt::join(path, " "));
             return false;
         }
 
