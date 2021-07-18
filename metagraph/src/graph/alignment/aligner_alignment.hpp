@@ -12,9 +12,7 @@
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
-
 #include "common/vector.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
 
 
 namespace mtg {

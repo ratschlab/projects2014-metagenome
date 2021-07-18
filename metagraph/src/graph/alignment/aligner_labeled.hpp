@@ -4,9 +4,9 @@
 #include <optional>
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/ordered_set.h>
 
 #include "dbg_aligner.hpp"
-#include "common/vector_set.hpp"
 #include "common/hashers/hash.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
@@ -21,6 +21,12 @@ namespace matrix {
 
 namespace graph {
 namespace align {
+
+
+template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64_t,
+          class EqualTo = std::equal_to<Key>, class Allocator = std::allocator<Key>,
+          class Container = std::vector<Key, Allocator>>
+using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, IndexType>;
 
 
 class DynamicLabeledGraph {
