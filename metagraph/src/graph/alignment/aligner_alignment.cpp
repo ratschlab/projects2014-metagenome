@@ -154,7 +154,7 @@ size_t Alignment::trim_query_prefix(size_t n,
     nodes_.erase(nodes_.begin(), node_it);
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
-    cigar_.erase(cigar_.begin(), it);
+    cigar_.data().erase(cigar_.begin(), it);
 
     assert(is_valid(graph, &config));
 
@@ -573,7 +573,7 @@ Json::Value Alignment::to_json(std::string_view full_query,
 
 std::shared_ptr<const std::string> Alignment
 ::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
-    cigar_.clear();
+    cigar_ = Cigar();
     nodes_.clear();
     sequence_.clear();
 
@@ -692,8 +692,8 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             //           ACGA
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 1) * config.gap_extension_penalty;
-            cigar_.insert(cigar_.begin(),
-                          Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
+            cigar_.data().insert(cigar_.begin(),
+                                 Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
         }
     } else {
         // no overlap
@@ -714,7 +714,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         trim_clipping();
 
         sequence_ = std::string(1, '$') + sequence_;
-        cigar_.insert(cigar_.begin(), Cigar::value_type{ Cigar::DELETION, 1 });
+        cigar_.data().insert(cigar_.begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
         if (static_cast<size_t>(gap_length) < graph.get_k()) {
@@ -723,8 +723,9 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             assert(extra_nodes >= 2);
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 2) * config.gap_extension_penalty;
-            cigar_.insert(cigar_.begin(),
-                          Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
+            cigar_.data().insert(
+                cigar_.begin(), Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
+            );
         }
 
         extend_query_begin(query_.data() - gap_length);

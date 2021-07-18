@@ -84,8 +84,9 @@ class Alignment {
         if (clipping) {
             cigar_.front().second += full_query_begin - begin;
         } else {
-            cigar_.insert(cigar_.begin(),
-                          std::make_pair(Cigar::CLIPPED, full_query_begin - begin));
+            cigar_.data().insert(
+                cigar_.begin(), Cigar::value_type(Cigar::CLIPPED, full_query_begin - begin)
+            );
         }
     }
 
@@ -96,15 +97,8 @@ class Alignment {
             cigar_.append(Cigar::CLIPPED, end - full_query_end);
     }
 
-    void trim_clipping() {
-        if (get_clipping())
-            cigar_.pop_front();
-    }
-
-    void trim_end_clipping() {
-        if (get_end_clipping())
-            cigar_.pop_back();
-    }
+    inline size_t trim_clipping() { return cigar_.trim_clipping(); }
+    inline size_t trim_end_clipping() { return cigar_.trim_end_clipping(); }
 
     size_t trim_offset();
 

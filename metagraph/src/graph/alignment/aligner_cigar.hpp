@@ -26,8 +26,10 @@ class Cigar {
 
     typedef uint32_t LengthType;
     typedef std::pair<Operator, LengthType> value_type;
+    typedef typename std::vector<value_type>::iterator iterator;
+    typedef typename std::vector<value_type>::const_iterator const_iterator;
 
-    Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
+    Cigar(Operator op = CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
 
     // See section 1.4 in https://samtools.github.io/hts-specs/SAMv1.pdf for
@@ -43,18 +45,33 @@ class Cigar {
     void append(Operator op, LengthType num = 1);
     void append(Cigar&& other);
 
-    void pop_front() {
-        assert(cigar_.size());
-        cigar_.erase(cigar_.begin(), cigar_.begin() + 1);
+    LengthType trim_clipping() {
+        if (cigar_.size() && cigar_.front().first == CLIPPED) {
+            LengthType ret_val = cigar_.front().second;
+            cigar_.erase(cigar_.begin(), cigar_.begin() + 1);
+            return ret_val;
+        } else {
+            return 0;
+        }
     }
 
-    void pop_back() {
-        assert(cigar_.size());
-        cigar_.pop_back();
+    LengthType trim_end_clipping() {
+        if (cigar_.size() && cigar_.back().first == CLIPPED) {
+            LengthType ret_val = cigar_.back().second;
+            cigar_.pop_back();
+            return ret_val;
+        } else {
+            return 0;
+        }
     }
 
-    typedef typename std::vector<value_type>::iterator iterator;
-    typedef typename std::vector<value_type>::const_iterator const_iterator;
+    LengthType get_clipping() const {
+        return cigar_.size() && cigar_.front().first == CLIPPED ? cigar_.front().second : 0;
+    }
+
+    LengthType get_end_clipping() const {
+        return cigar_.size() && cigar_.back().first == CLIPPED ? cigar_.back().second : 0;
+    }
 
     // This is essentially just a vector, so there's no reason not to have it editable
     iterator begin() { return cigar_.begin(); }
@@ -62,13 +79,8 @@ class Cigar {
     const_iterator begin() const { return cigar_.cbegin(); }
     const_iterator end() const { return cigar_.cend(); }
 
-    template <typename... Args>
-    void insert(iterator it, Args&&... args) {
-        cigar_.insert(it, std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void erase(Args&&... args) { cigar_.erase(std::forward<Args>(args)...); }
+    std::vector<value_type>& data() { return cigar_; }
+    const std::vector<value_type>& data() const { return cigar_; }
 
     value_type& front() { return cigar_.front(); }
     value_type& back() { return cigar_.back(); }
@@ -76,31 +88,15 @@ class Cigar {
     const value_type& back() const { return cigar_.back(); }
 
     bool operator==(const Cigar &other) const { return cigar_ == other.cigar_; }
-
     bool operator!=(const Cigar &other) const { return !(*this == other); }
-
-    void clear() { cigar_.clear(); }
-
-    LengthType get_clipping() const {
-        return cigar_.size() && cigar_.front().first == Operator::CLIPPED
-            ? cigar_.front().second
-            : 0;
-    }
-
-    LengthType get_end_clipping() const {
-        return cigar_.size() && cigar_.back().first == Operator::CLIPPED
-            ? cigar_.back().second
-            : 0;
-    }
 
     size_t get_num_matches() const {
         return std::accumulate(begin(), end(), 0, [&](size_t old, const value_type &op) {
-            return old + (op.first == Operator::MATCH) * op.second;
+            return old + (op.first == MATCH) * op.second;
         });
     }
 
-    // Return true if the cigar is valid. reference_begin points to the first
-    // character of the reference sequence after clipping is trimmed
+    // Return true if the cigar is valid
     bool is_valid(std::string_view reference, std::string_view query) const;
 
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
