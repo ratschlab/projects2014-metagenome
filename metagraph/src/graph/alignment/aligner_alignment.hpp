@@ -144,6 +144,7 @@ class Alignment {
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
+    // TODO: rename to query_view_
     std::string_view query_;
     std::vector<node_index> nodes_;
     std::string sequence_;
