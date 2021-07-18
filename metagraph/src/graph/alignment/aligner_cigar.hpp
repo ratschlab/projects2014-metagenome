@@ -26,7 +26,6 @@ class Cigar {
 
     typedef uint32_t LengthType;
     typedef std::pair<Operator, LengthType> value_type;
-    typedef typename std::vector<value_type>::iterator iterator;
     typedef typename std::vector<value_type>::const_iterator const_iterator;
 
     Cigar(Operator op = CLIPPED, LengthType num = 0)
@@ -35,6 +34,7 @@ class Cigar {
     // See section 1.4 in https://samtools.github.io/hts-specs/SAMv1.pdf for
     // a specification of the CIGAR string format.
     // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
+    // The symbol 'G' is introduced to indicate the insertion of a graph node.
     Cigar(std::string_view cigar_str);
 
     size_t size() const { return cigar_.size(); }
@@ -73,19 +73,20 @@ class Cigar {
         return cigar_.size() && cigar_.back().first == CLIPPED ? cigar_.back().second : 0;
     }
 
-    // This is essentially just a vector, so there's no reason not to have it editable
-    iterator begin() { return cigar_.begin(); }
-    iterator end() { return cigar_.end(); }
+    void extend_clipping(LengthType n) {
+        assert(cigar_.size());
+        if (cigar_.front().first != CLIPPED) {
+            cigar_.insert(begin(), value_type(CLIPPED, n));
+        } else {
+            cigar_.front().second += n;
+        }
+    }
+
     const_iterator begin() const { return cigar_.cbegin(); }
     const_iterator end() const { return cigar_.cend(); }
 
     std::vector<value_type>& data() { return cigar_; }
     const std::vector<value_type>& data() const { return cigar_; }
-
-    value_type& front() { return cigar_.front(); }
-    value_type& back() { return cigar_.back(); }
-    const value_type& front() const { return cigar_.front(); }
-    const value_type& back() const { return cigar_.back(); }
 
     bool operator==(const Cigar &other) const { return cigar_ == other.cigar_; }
     bool operator!=(const Cigar &other) const { return !(*this == other); }

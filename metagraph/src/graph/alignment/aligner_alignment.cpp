@@ -86,7 +86,7 @@ size_t Alignment::trim_query_prefix(size_t n,
 
     size_t clipping = get_clipping() + n;
 
-    auto it = cigar_.begin() + static_cast<bool>(clipping);
+    auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
 
     auto s_it = sequence_.begin();
@@ -172,7 +172,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
         if (offset_) {
             *this = Alignment();
         } else {
-            std::reverse(cigar_.begin(), cigar_.end());
+            std::reverse(cigar_.data().begin(), cigar_.data().end());
             std::reverse(nodes_.begin(), nodes_.end());
             ::reverse_complement(sequence_.begin(), sequence_.end());
             assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
@@ -308,7 +308,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
         assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
-    std::reverse(cigar_.begin(), cigar_.end());
+    std::reverse(cigar_.data().begin(), cigar_.data().end());
     assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
     orientation_ = !orientation_;

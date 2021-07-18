@@ -227,7 +227,7 @@ inline void AlignmentAggregator<AlignmentCompare>
             );
 
             if (aln.empty() || aln.get_sequence().size() < graph_.get_k()
-                    || aln.get_cigar().front().first != Cigar::MATCH)
+                    || aln.get_cigar().begin()->first != Cigar::MATCH)
                 continue;
 
             assert(aln.get_query().data() == chain.get_query().data() + chain.get_query().size());
