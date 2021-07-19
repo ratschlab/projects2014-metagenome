@@ -109,7 +109,7 @@ size_t Alignment::trim_query_prefix(size_t n,
     };
 
     while (n) {
-        if (it == cigar_.end()) {
+        if (it == cigar_.data().end()) {
             *this = Alignment();
             return 0;
         }
@@ -156,7 +156,7 @@ size_t Alignment::trim_query_prefix(size_t n,
     nodes_.erase(nodes_.begin(), node_it);
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
-    cigar_.data().erase(cigar_.begin(), it);
+    cigar_.data().erase(cigar_.data().begin(), it);
 
     assert(is_valid(graph, &config));
 
@@ -326,13 +326,13 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
 
     Json::Value path;
 
-    auto cigar_it = cigar_.begin();
+    auto cigar_it = cigar_.data().begin();
     if (cigar_.size() && cigar_it->first == Cigar::CLIPPED) {
         cigar_it++;
     }
 
     size_t cigar_offset = 0;
-    assert(cigar_it != cigar_.end());
+    assert(cigar_it != cigar_.data().end());
 
     int64_t rank = 1;
     const char *query_start = query_.data();
@@ -356,7 +356,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     mapping["position"] = position;
 
     // handle alignment to the first node
-    while (cur_pos < node_size && cigar_it != cigar_.end()) {
+    while (cur_pos < node_size && cigar_it != cigar_.data().end()) {
         assert(cigar_it->second > cigar_offset);
         size_t next_pos = std::min(node_size,
                                    cur_pos + (cigar_it->second - cigar_offset));
@@ -396,7 +396,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             case Cigar::CLIPPED: {
                 ++cigar_it;
                 cigar_offset = 0;
-                assert(cigar_it == cigar_.end());
+                assert(cigar_it == cigar_.data().end());
                 continue;
             } break;
             case Cigar::NODE_INSERTION: {
@@ -420,7 +420,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
 
     // handle the rest of the alignment
     for (auto node_it = nodes_.begin() + 1; node_it != nodes_.end(); ++node_it) {
-        assert(cigar_it != cigar_.end());
+        assert(cigar_it != cigar_.data().end());
         assert(cigar_it->second > cigar_offset);
 
         Json::Value mapping;
@@ -443,7 +443,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             ++cigar_it;
             cigar_offset = 0;
             mapping["edit"].append(edit);
-            assert(cigar_it != cigar_.end());
+            assert(cigar_it != cigar_.data().end());
         }
 
         Json::Value edit;
@@ -480,8 +480,8 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     }
 
     assert(query_start == query_end);
-    assert(cigar_it == cigar_.end()
-            || (cigar_it + 1 == cigar_.end() && cigar_it->first == Cigar::CLIPPED));
+    assert(cigar_it == cigar_.data().end()
+            || (cigar_it + 1 == cigar_.data().end() && cigar_it->first == Cigar::CLIPPED));
 
     path["length"] = Json::Value::UInt64(nodes_.size());
 
@@ -694,7 +694,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             //           ACGA
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 1) * config.gap_extension_penalty;
-            cigar_.data().insert(cigar_.begin(),
+            cigar_.data().insert(cigar_.data().begin(),
                                  Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
         }
     } else {
@@ -716,7 +716,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         trim_clipping();
 
         sequence_ = std::string(1, '$') + sequence_;
-        cigar_.data().insert(cigar_.begin(), Cigar::value_type{ Cigar::DELETION, 1 });
+        cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
         if (static_cast<size_t>(gap_length) < graph.get_k()) {
@@ -726,7 +726,8 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 2) * config.gap_extension_penalty;
             cigar_.data().insert(
-                cigar_.begin(), Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
+                cigar_.data().begin(),
+                Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
             );
         }
 

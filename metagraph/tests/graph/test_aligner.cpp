@@ -24,8 +24,8 @@ const bool PICK_REV_COMP = true;
 
 bool is_exact_match(const Alignment &alignment) {
     const Cigar &cigar = alignment.get_cigar();
-    return cigar.size() == 1 && cigar.begin()->first == Cigar::MATCH
-        && cigar.begin()->second == alignment.get_query().size();
+    return cigar.size() == 1 && cigar.data().begin()->first == Cigar::MATCH
+        && cigar.data().begin()->second == alignment.get_query().size();
 }
 
 void check_score_matrix(const DBGAlignerConfig &config,

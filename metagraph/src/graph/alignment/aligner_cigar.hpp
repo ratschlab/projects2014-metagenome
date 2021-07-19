@@ -26,7 +26,6 @@ class Cigar {
 
     typedef uint32_t LengthType;
     typedef std::pair<Operator, LengthType> value_type;
-    typedef typename std::vector<value_type>::const_iterator const_iterator;
 
     Cigar(Operator op = CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -76,14 +75,11 @@ class Cigar {
     void extend_clipping(LengthType n) {
         assert(cigar_.size());
         if (cigar_.front().first != CLIPPED) {
-            cigar_.insert(begin(), value_type(CLIPPED, n));
+            cigar_.insert(cigar_.begin(), value_type(CLIPPED, n));
         } else {
             cigar_.front().second += n;
         }
     }
-
-    const_iterator begin() const { return cigar_.cbegin(); }
-    const_iterator end() const { return cigar_.cend(); }
 
     std::vector<value_type>& data() { return cigar_; }
     const std::vector<value_type>& data() const { return cigar_; }
@@ -92,7 +88,8 @@ class Cigar {
     bool operator!=(const Cigar &other) const { return !(*this == other); }
 
     size_t get_num_matches() const {
-        return std::accumulate(begin(), end(), 0, [&](size_t old, const value_type &op) {
+        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+                               [&](size_t old, const value_type &op) {
             return old + (op.first == MATCH) * op.second;
         });
     }

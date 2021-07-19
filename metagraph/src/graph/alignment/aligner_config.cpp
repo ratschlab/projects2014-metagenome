@@ -68,15 +68,15 @@ DBGAlignerConfig::score_t DBGAlignerConfig
 
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
-    auto it = cigar.begin();
+    auto it = cigar.data().begin();
     if (it->first == Cigar::CLIPPED)
         ++it;
 
-    for ( ; it != cigar.end(); ++it) {
+    for ( ; it != cigar.data().end(); ++it) {
         const auto &op = *it;
         switch (op.first) {
             case Cigar::CLIPPED: {
-                if (it + 1 != cigar.end())
+                if (it + 1 != cigar.data().end())
                     alt_it += op.second;
             } break;
             case Cigar::MATCH: {

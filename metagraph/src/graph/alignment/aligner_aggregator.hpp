@@ -222,12 +222,12 @@ inline void AlignmentAggregator<AlignmentCompare>
 
             // first trim front of the incoming alignment
             size_t overlap = std::min(
-                static_cast<size_t>((chain.get_cigar().end() - 2)->second),
+                static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
                 aln.trim_query_prefix(chain_end - it->get_query().data(), graph_, config_)
             );
 
             if (aln.empty() || aln.get_sequence().size() < graph_.get_k()
-                    || aln.get_cigar().begin()->first != Cigar::MATCH)
+                    || aln.get_cigar().data().begin()->first != Cigar::MATCH)
                 continue;
 
             assert(aln.get_query().data() == chain.get_query().data() + chain.get_query().size());
