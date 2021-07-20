@@ -58,6 +58,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          bool suppress_unlabeled,
                                          size_t num_top_labels,
                                          double discovery_fraction,
+                                         double presence_fraction,
                                          std::string anno_labels_delimiter,
                                          const AnnotatedDBG &anno_graph,
                                          bool with_kmer_counts,
@@ -70,7 +71,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto top_labels
             = anno_graph.get_top_label_signatures(sequence,
                                                   num_top_labels,
-                                                  discovery_fraction);
+                                                  discovery_fraction,
+                                                  presence_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return "";
@@ -89,7 +91,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     } else if (query_coords) {
         auto result = anno_graph.get_kmer_coordinates(sequence,
                                                       num_top_labels,
-                                                      discovery_fraction);
+                                                      discovery_fraction,
+                                                      presence_fraction);
 
         if (!result.size() && suppress_unlabeled)
             return "";
@@ -109,6 +112,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto result = anno_graph.get_label_count_quantiles(sequence,
                                                            num_top_labels,
                                                            discovery_fraction,
+                                                           presence_fraction,
                                                            count_quantiles);
 
         if (!result.size() && suppress_unlabeled)
@@ -126,6 +130,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
                                                     discovery_fraction,
+                                                    presence_fraction,
                                                     with_kmer_counts);
 
         if (!top_labels.size() && suppress_unlabeled)
@@ -140,7 +145,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         output += '\n';
 
     } else {
-        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction);
+        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction,
+                                                                 presence_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return "";
@@ -927,7 +933,8 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
-                                        config.discovery_fraction, config.anno_labels_delimiter,
+                                        config.discovery_fraction, config.presence_fraction,
+                                        config.anno_labels_delimiter,
                                         anno_graph, config.count_kmers, config.count_quantiles,
                                         config.query_coords);
 }

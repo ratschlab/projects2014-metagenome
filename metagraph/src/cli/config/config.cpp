@@ -198,6 +198,8 @@ Config::Config(int argc, char *argv[]) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--presence-fraction")) {
+            presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
@@ -601,6 +603,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
+        print_usage_and_exit = true;
+
+    if (presence_fraction < 0 || presence_fraction > 1)
         print_usage_and_exit = true;
 
     if (min_count >= max_count) {
@@ -1191,6 +1196,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
+            fprintf(stderr, "\t   --presence-fraction [FLOAT] fraction of k-mers required for presence in the graph [0.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
