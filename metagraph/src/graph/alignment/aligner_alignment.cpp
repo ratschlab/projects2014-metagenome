@@ -5,6 +5,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 
 namespace mtg {
@@ -14,37 +15,40 @@ namespace align {
 using mtg::common::logger;
 
 
-template <typename NodeType>
-Alignment<NodeType>::Alignment(std::string_view query,
-                               std::vector<NodeType>&& nodes,
-                               std::string&& sequence,
-                               score_t score,
-                               size_t clipping,
-                               bool orientation,
-                               size_t offset)
+Alignment::Alignment(std::string_view query,
+                     std::vector<node_index>&& nodes,
+                     std::string&& sequence,
+                     score_t score,
+                     size_t clipping,
+                     bool orientation,
+                     size_t offset)
       : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
-        score_(score), orientation_(orientation), offset_(offset) {
-    size_t min_length = std::min(query_.size(), sequence_.size());
-
-    cigar_ = std::inner_product(
-        query_.data(),
-        query_.data() + min_length,
-        sequence_.c_str(),
-        Cigar(Cigar::CLIPPED, clipping),
-        [&](Cigar &cigar, bool equal) -> Cigar& {
-            cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
-            return cigar;
-        },
-        std::equal_to<char>()
-    );
-
-    assert(!(query_.size() - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::INSERTION, query_.size() - min_length);
-    cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
+        score_(score),
+        orientation_(orientation),
+        offset_(offset) {
+    assert(query_.size() == sequence_.size());
+    cigar_ = std::inner_product(query_.begin(), query_.end(), sequence_.begin(),
+                                Cigar(Cigar::CLIPPED, clipping),
+                                [&](Cigar &cigar, bool equal) -> Cigar& {
+                                    cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
+                                    return cigar;
+                                },
+                                std::equal_to<char>());
 }
 
-template <typename NodeType>
-void Alignment<NodeType>::append(Alignment&& other) {
+std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
+    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+                       (alignment.get_orientation() ? "-" : "+"),
+                       alignment.get_sequence(),
+                       alignment.get_score(),
+                       alignment.get_cigar().get_num_matches(),
+                       alignment.get_cigar().to_string(),
+                       alignment.get_offset());
+
+    return out;
+}
+
+void Alignment::append(Alignment&& other) {
     assert(query_.data() + query_.size() == other.query_.data());
     assert(orientation_ == other.orientation_);
     assert(cigar_.empty() || cigar_.back().first != Cigar::CLIPPED);
@@ -57,57 +61,38 @@ void Alignment<NodeType>::append(Alignment&& other) {
     query_ = { query_.data(), query_.size() + other.query_.size() };
 }
 
-template <typename NodeType>
-void Alignment<NodeType>::trim_offset() {
-    if (!offset_ || empty() || cigar_.empty())
-        return;
+size_t Alignment::trim_offset() {
+    if (!offset_ || nodes_.size() <= 1)
+        return 0;
 
-    auto it = cigar_.begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    if (it == cigar_.end())
-        return;
-
-    auto jt = nodes_.begin();
-    size_t counter = 0;
-    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
-        if (counter == it->second
-                || it->first == Cigar::CLIPPED
-                || it->first == Cigar::INSERTION) {
-            ++it;
-            counter = 0;
-            continue;
-        }
-
-        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
-                                          static_cast<size_t>(nodes_.end() - jt) });
-        offset_ -= jump;
-        counter += jump;
-        jt += jump;
-    }
-
-    if (jt == nodes_.end()) {
-        --jt;
-        ++offset_;
-    }
-
-    nodes_.erase(nodes_.begin(), jt);
+    size_t trim = std::min(offset_, nodes_.size() - 1);
+    offset_ -= trim;
+    nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    return trim;
 }
 
-template <typename NodeType>
-void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
-                                             std::string_view query_rev_comp) {
-    assert(graph.get_mode() == DeBruijnGraph::CANONICAL);
-
-    if (empty())
-        return;
-
+void Alignment::reverse_complement(const DeBruijnGraph &graph,
+                                   std::string_view query_rev_comp) {
     assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
-    assert(is_valid(graph));
 
     trim_offset();
-    assert(is_valid(graph));
+    assert(!offset_ || nodes_.size() == 1);
+
+    if (dynamic_cast<const RCDBG*>(&graph)) {
+        if (offset_) {
+            *this = Alignment();
+        } else {
+            std::reverse(cigar_.begin(), cigar_.end());
+            std::reverse(nodes_.begin(), nodes_.end());
+            ::reverse_complement(sequence_.begin(), sequence_.end());
+            assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
+
+            orientation_ = !orientation_;
+            query_ = { query_rev_comp.data() + get_clipping(),
+                       query_rev_comp.size() - get_clipping() - get_end_clipping() };
+        }
+        return;
+    }
 
     if (!offset_) {
         reverse_complement_seq_path(graph, sequence_, nodes_);
@@ -125,9 +110,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // from the node prefix are not included).
 
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(
-                canonical ? canonical->get_graph() : graph
-            );
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
 
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);
@@ -167,9 +150,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             }
 
             for (size_t i = num_first_steps; i < offset_; ++i) {
-                NodeType next_node = 0;
+                node_index next_node = 0;
                 char last_char;
-                canonical->call_outgoing_kmers(nodes_[0], [&](NodeType next, char c) {
+                canonical->call_outgoing_kmers(nodes_[0], [&](node_index next, char c) {
                     if (c == boss::BOSS::kSentinel)
                         return;
 
@@ -210,7 +193,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // trim off ending from reverse complement (corresponding to the added prefix)
             for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
-                graph.adjacent_incoming_nodes(nodes_[0], [&](NodeType prev) {
+                graph.adjacent_incoming_nodes(nodes_[0], [&](node_index prev) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
@@ -246,9 +229,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
-template <typename NodeType>
-Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           std::string_view label) const {
+Json::Value Alignment::path_json(size_t node_size, std::string_view label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -417,12 +398,11 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     return path;
 }
 
-template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
-                                         const DeBruijnGraph &graph,
-                                         bool is_secondary,
-                                         std::string_view read_name,
-                                         std::string_view label) const {
+Json::Value Alignment::to_json(std::string_view full_query,
+                               const DeBruijnGraph &graph,
+                               bool is_secondary,
+                               std::string_view read_name,
+                               std::string_view label) const {
     assert(is_valid(graph));
 
     // encode alignment
@@ -458,17 +438,13 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
         alignment["is_secondary"] = is_secondary;
 
     alignment["identity"] = query_.size()
-        ? static_cast<double>(get_num_matches()) / query_.size()
+        ? static_cast<double>(cigar_.get_num_matches()) / query_.size()
         : 0;
 
     alignment["read_mapped"] = static_cast<bool>(query_.size());
 
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
-
-    if (label.data())
-        alignment["sample_name"] = std::string(label);
-
 
     // Unused flags (for now)
     //alignment["quality"]; // bytes
@@ -497,8 +473,7 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
     return alignment;
 }
 
-template <typename NodeType>
-std::shared_ptr<const std::string> Alignment<NodeType>
+std::shared_ptr<const std::string> Alignment
 ::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
     cigar_.clear();
     nodes_.clear();
@@ -630,9 +605,7 @@ bool spell_path(const DeBruijnGraph &graph,
     return true;
 }
 
-template <typename NodeType>
-bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
-                                   const DBGAlignerConfig *config) const {
+bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config) const {
     std::string path;
     if (!spell_path(graph, nodes_, path, offset_)) {
         std::cerr << *this << std::endl;
@@ -664,36 +637,34 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 }
 
 
-template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
-                                         bool is_reverse_complement)
-          : query_(new std::string()), query_rc_(new std::string()) {
+QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
-    query_->reserve(query.size() + 8);
-    query_->resize(query.size());
-    query_rc_->reserve(query.size() + 8);
-    query_rc_->resize(query.size());
+    std::string query_padded;
+    query_padded.reserve(query.size() + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
-    std::transform(query.begin(), query.end(), query_->begin(), [](char c) {
-        return c >= 0 ? toupper(c) : 127;
-    });
+    std::transform(query.begin(), query.end(), std::back_inserter(query_padded),
+                   [](char c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
-    memset(query_->data() + query_->size(), '\0', query_->capacity() - query_->size());
+    memset(query_padded.data() + query.size(), '\0', query_padded.capacity() - query.size());
 
     // set the reverse complement
-    memcpy(query_rc_->data(), query_->data(), query_->capacity());
-    reverse_complement(query_rc_->begin(), query_rc_->end());
+    std::string query_rc_padded(query_padded);
 
+    // fill padding just in case optimizations removed it
+    query_rc_padded.reserve(query.size() + 8);
+    memset(query_rc_padded.data() + query.size(), '\0', query_rc_padded.capacity() - query.size());
+
+    // reverse complement
+    reverse_complement(query_rc_padded.begin(), query_rc_padded.end());
     if (is_reverse_complement)
-        std::swap(query_, query_rc_);
+        std::swap(query_padded, query_rc_padded);
+
+    query_ = std::make_shared<const std::string>(std::move(query_padded));
+    query_rc_ = std::make_shared<const std::string>(std::move(query_rc_padded));
 }
-
-
-template class Alignment<>;
-template class QueryAlignment<>;
 
 } // namespace align
 } // namespace graph
