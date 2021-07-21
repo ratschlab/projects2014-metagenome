@@ -623,7 +623,7 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
     for (; k > 0; --k) {
         i = bwd(i);
     }
-    return std::make_pair(get_node_last_value(i), bwd(i));
+    return std::make_pair(get_node_last_value(i), i);
 }
 
 /**
@@ -849,9 +849,12 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
 
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
- * source node.
+ * source node, and the node whose last character corresponds to the first
+ * character of the sequence. If the graph is suffix indexed, then the returned
+ * node is the last node visited after k - indexed_suffix_length_ bwd steps.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
+::get_node_seq_with_end_node_indexed(edge_index x) const {
     CHECK_INDEX(x);
 
     std::vector<TAlphabet> ret(k_);
@@ -880,7 +883,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return ret;
+            return std::make_tuple(ret, x, true);
         }
     }
 
@@ -893,7 +896,41 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
         ret[--i] = get_node_last_value(x);
     }
 
-    return ret;
+    return std::make_tuple(ret, x, false);
+}
+
+/**
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node.
+ */
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
+    return std::get<0>(get_node_seq_with_end_node_indexed(i));
+}
+
+/**
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node, and the node whose last character corresponds to the first
+ * character of the sequence.
+ */
+std::pair<std::vector<TAlphabet>, edge_index> BOSS
+::get_node_seq_with_end_node(edge_index i) const {
+    auto [seq, last_node, indexed] = get_node_seq_with_end_node_indexed(i);
+
+    if (indexed) {
+        assert(indexed_suffix_length_);
+
+        auto it = seq.rend() - indexed_suffix_length_;
+        assert(*it == get_node_last_value(last_node));
+        for (++it; it != seq.rend(); ++it) {
+            last_node = bwd(last_node);
+            assert(*it == get_node_last_value(last_node));
+        }
+    }
+
+    assert(seq[0] == get_node_last_value(last_node));
+    assert(std::make_pair(seq[0], last_node) == get_minus_k_value(i, k_ - 1));
+
+    return std::make_pair(std::move(seq), last_node);
 }
 
 /**

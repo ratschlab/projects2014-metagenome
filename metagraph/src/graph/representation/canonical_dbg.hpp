@@ -24,27 +24,21 @@ class CanonicalDBG : public DeBruijnGraph {
      * @param graph a graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 100'000);
+    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 1024);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 100'000);
+    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 1024);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 100'000);
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a pointer to the graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024);
 
     /**
      * Copy constructor for CanonicalDBG. This creates a new wrapper with empty caches.
@@ -135,6 +129,8 @@ class CanonicalDBG : public DeBruijnGraph {
                             const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
     virtual const DeBruijnGraph& get_graph() const { return graph_; }
+    std::shared_ptr<DeBruijnGraph> get_graph_ptr() const { return graph_ptr_; }
+    std::shared_ptr<const DeBruijnGraph> get_const_graph_ptr() const { return const_graph_ptr_; }
 
     virtual bool operator==(const CanonicalDBG &other) const {
         return graph_ == other.graph_;
@@ -176,6 +172,9 @@ class CanonicalDBG : public DeBruijnGraph {
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
+
+    // Private constructor. The others delegate to this one
+    explicit CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size);
 
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph

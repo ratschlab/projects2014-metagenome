@@ -6,10 +6,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_seeder_methods.hpp"
-#include "graph/alignment/aligner_extender_methods.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -91,11 +88,7 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
-    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg) {
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
-            dbg = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
-    }
+    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -136,7 +129,7 @@ void map_sequences_in_file(const std::string &file,
         } else if (config.query_presence || config.count_kmers) {
             // TODO: make more efficient
             // TODO: canonicalization
-            if (dbg->get_mode() == CanonicalDBG::PRIMARY)
+            if (dbg->get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
@@ -338,7 +331,6 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
-    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -349,10 +341,8 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        logger->trace("Primary graph wrapped into canonical");
-        graph = std::make_shared<CanonicalDBG>(graph);
-    }
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+        graph = primary_to_canonical(graph);
 
     if (config->map_sequences) {
         if (!config->alignment_length) {
@@ -361,7 +351,7 @@ int align_to_graph(Config *config) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
+                && !dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph())) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -422,9 +412,9 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&](SeqBatch batch) {
-                auto aln_graph = graph;
-                if (auto *canonical = dynamic_cast<CanonicalDBG*>(graph.get()))
-                    aln_graph = std::make_shared<CanonicalDBG>(*canonical);
+                // the graph should only be cached if the base graph is in PRIMARY mode,
+                // or if it's not CANONICAL and backwards traversal will be required
+                auto aln_graph = make_cached_graph(graph, *config);
 
                 std::unique_ptr<IDBGAligner> aligner;
                 aligner = build_aligner(*aln_graph, aligner_config);
